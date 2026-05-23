@@ -5,7 +5,7 @@ Script de suppression des tests DD02, DD04, DD03 de la section Immobilisations
 dans le PROGRAMME DE CONTRÔLE pour E-revision
 
 Auteur: Assistant IA
-Date: 16 Mai 2026
+Date: 17 Mai 2026
 Contexte: Mise à jour du menu Démarrer E-revision - Suppression des tests comptables Immobilisations
 """
 
@@ -33,9 +33,7 @@ def remove_immobilisations_tests_dd02_dd04_dd03(file_path: str) -> bool:
     try:
         # Lire le fichier
         with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        
-        content = ''.join(lines)
+            content = f.read()
         
         # Vérifier que nous sommes dans la bonne section
         if 'e-revision' not in content.lower():
@@ -46,102 +44,64 @@ def remove_immobilisations_tests_dd02_dd04_dd03(file_path: str) -> bool:
             print("❌ Erreur: Section Immobilisations non trouvée")
             return False
         
-        # Trouver les indices de début et fin pour chaque test à supprimer
-        tests_to_remove = []
+        # Pattern pour supprimer le test DD02 - Travaux analytiques -Immo (AVEC modes)
+        pattern_dd02_travaux = r',\s*\{\s*id:\s*[\'"]immobilisations-dd02-travaux-analytiques[\'"]\s*,\s*reference:\s*[\'"]DD02[\'"]\s*,\s*label:\s*[\'"]Travaux analytiques -Immo[\'"]\s*,\s*processus:\s*[\'"]IMMOBILISATIONS[\'"]\s*,\s*command:\s*`[^`]+`\s*,\s*modes:\s*\[(?:[^\[\]]|\[[^\]]*\])*\]\s*\}'
         
-        # Chercher DD02 Feuilles maîtresses
-        for i, line in enumerate(lines):
-            if "id: 'immobilisations-dd02'" in line and "immobilisations-dd02-travaux" not in line:
-                # Trouver la fin du bloc (jusqu'à la fermeture des modes)
-                start_idx = i
-                bracket_count = 0
-                found_start = False
-                for j in range(i, len(lines)):
-                    if '{' in lines[j]:
-                        bracket_count += lines[j].count('{')
-                        found_start = True
-                    if '}' in lines[j]:
-                        bracket_count -= lines[j].count('}')
-                    if found_start and bracket_count == 0:
-                        tests_to_remove.append(('DD02 Feuilles maîtresses', start_idx, j + 1))
-                        break
+        # Pattern pour supprimer le test DD02 - Feuilles maîtresses (AVEC modes)
+        pattern_dd02_feuilles = r',\s*\{\s*id:\s*[\'"]immobilisations-dd02[\'"]\s*,\s*reference:\s*[\'"]DD02[\'"]\s*,\s*label:\s*[\'"]Feuilles maîtresses-IMMOBILISATIONS[\'"]\s*,\s*processus:\s*[\'"]IMMOBILISATIONS[\'"]\s*,\s*command:\s*`[^`]+`\s*,\s*modes:\s*\[(?:[^\[\]]|\[[^\]]*\])*\]\s*\}'
         
-        # Chercher DD02 Travaux analytiques
-        for i, line in enumerate(lines):
-            if "id: 'immobilisations-dd02-travaux'" in line:
-                start_idx = i
-                bracket_count = 0
-                found_start = False
-                for j in range(i, len(lines)):
-                    if '{' in lines[j]:
-                        bracket_count += lines[j].count('{')
-                        found_start = True
-                    if '}' in lines[j]:
-                        bracket_count -= lines[j].count('}')
-                    if found_start and bracket_count == 0:
-                        tests_to_remove.append(('DD02 Travaux analytiques', start_idx, j + 1))
-                        break
+        # Pattern pour supprimer le test DD04 - Revue des techniques comptables (AVEC modes)
+        pattern_dd04 = r',\s*\{\s*id:\s*[\'"]immobilisations-dd04[\'"]\s*,\s*reference:\s*[\'"]DD04[\'"]\s*,\s*label:\s*[\'"]Revue des techniques comptables[\'"]\s*,\s*processus:\s*[\'"]IMMOBILISATIONS[\'"]\s*,\s*command:\s*`[^`]+`\s*,\s*modes:\s*\[(?:[^\[\]]|\[[^\]]*\])*\]\s*\}'
         
-        # Chercher DD03
-        for i, line in enumerate(lines):
-            if "id: 'immobilisations-dd03'" in line:
-                start_idx = i
-                bracket_count = 0
-                found_start = False
-                for j in range(i, len(lines)):
-                    if '{' in lines[j]:
-                        bracket_count += lines[j].count('{')
-                        found_start = True
-                    if '}' in lines[j]:
-                        bracket_count -= lines[j].count('}')
-                    if found_start and bracket_count == 0:
-                        tests_to_remove.append(('DD03 Revue CI', start_idx, j + 1))
-                        break
+        # Pattern pour supprimer le test DD03 - Revue du Contrôle interne (AVEC modes)
+        pattern_dd03 = r',\s*\{\s*id:\s*[\'"]immobilisations-dd03[\'"]\s*,\s*reference:\s*[\'"]DD03[\'"]\s*,\s*label:\s*[\'"]Revue du Contrôle interne[\'"]\s*,\s*processus:\s*[\'"]IMMOBILISATIONS[\'"]\s*,\s*command:\s*`[^`]+`\s*,\s*modes:\s*\[(?:[^\[\]]|\[[^\]]*\])*\]\s*\}'
         
-        # Chercher DD04
-        for i, line in enumerate(lines):
-            if "id: 'immobilisations-dd04'" in line:
-                start_idx = i
-                bracket_count = 0
-                found_start = False
-                for j in range(i, len(lines)):
-                    if '{' in lines[j]:
-                        bracket_count += lines[j].count('{')
-                        found_start = True
-                    if '}' in lines[j]:
-                        bracket_count -= lines[j].count('}')
-                    if found_start and bracket_count == 0:
-                        tests_to_remove.append(('DD04 Revue techniques', start_idx, j + 1))
-                        break
+        # Compter les occurrences avant suppression
+        count_dd02_travaux = len(re.findall(pattern_dd02_travaux, content, re.DOTALL))
+        count_dd02_feuilles = len(re.findall(pattern_dd02_feuilles, content, re.DOTALL))
+        count_dd04 = len(re.findall(pattern_dd04, content, re.DOTALL))
+        count_dd03 = len(re.findall(pattern_dd03, content, re.DOTALL))
         
-        print(f"\n📊 Tests trouvés: {len(tests_to_remove)}")
-        for test_name, start, end in tests_to_remove:
-            print(f"   - {test_name}: lignes {start+1} à {end}")
+        print(f"\n📊 Tests trouvés:")
+        print(f"   - DD02 Travaux analytiques -Immo: {count_dd02_travaux}")
+        print(f"   - DD02 Feuilles maîtresses: {count_dd02_feuilles}")
+        print(f"   - DD04 Revue techniques: {count_dd04}")
+        print(f"   - DD03 Revue CI: {count_dd03}")
         
-        if not tests_to_remove:
+        if count_dd02_travaux == 0 and count_dd02_feuilles == 0 and count_dd04 == 0 and count_dd03 == 0:
             print("\n⚠️  Aucun test à supprimer trouvé")
             return False
         
-        # Supprimer les tests en ordre inverse pour ne pas décaler les indices
-        tests_to_remove.sort(key=lambda x: x[1], reverse=True)
+        # Supprimer les tests
+        modified_content = content
         
-        for test_name, start, end in tests_to_remove:
-            # Vérifier s'il y a une virgule avant le bloc
-            if start > 0 and ',' in lines[start - 1]:
-                # Supprimer aussi la virgule précédente
-                del lines[start - 1:end]
-                print(f"✅ Test {test_name} supprimé (avec virgule précédente)")
-            else:
-                # Supprimer juste le bloc
-                del lines[start:end]
-                # Vérifier s'il y a une virgule après
-                if start < len(lines) and lines[start].strip().startswith(','):
-                    lines[start] = lines[start].lstrip(',').lstrip()
-                print(f"✅ Test {test_name} supprimé")
+        # Supprimer DD02 - Travaux analytiques -Immo
+        if count_dd02_travaux > 0:
+            modified_content = re.sub(pattern_dd02_travaux, '', modified_content, flags=re.DOTALL)
+            print(f"✅ Test DD02 Travaux analytiques -Immo supprimé")
+        
+        # Supprimer DD02 - Feuilles maîtresses
+        if count_dd02_feuilles > 0:
+            modified_content = re.sub(pattern_dd02_feuilles, '', modified_content, flags=re.DOTALL)
+            print(f"✅ Test DD02 Feuilles maîtresses-IMMOBILISATIONS supprimé")
+        
+        # Supprimer DD04
+        if count_dd04 > 0:
+            modified_content = re.sub(pattern_dd04, '', modified_content, flags=re.DOTALL)
+            print(f"✅ Test DD04 Revue des techniques comptables supprimé")
+        
+        # Supprimer DD03
+        if count_dd03 > 0:
+            modified_content = re.sub(pattern_dd03, '', modified_content, flags=re.DOTALL)
+            print(f"✅ Test DD03 Revue du Contrôle interne supprimé")
+        
+        # Nettoyer les virgules doubles ou en trop
+        modified_content = re.sub(r',\s*,', ',', modified_content)
+        modified_content = re.sub(r',(\s*\])', r'\1', modified_content)
         
         # Écrire le fichier modifié
         with open(file_path, 'w', encoding='utf-8') as f:
-            f.writelines(lines)
+            f.write(modified_content)
         
         print(f"\n✅ Fichier modifié avec succès: {file_path}")
         print(f"\n📝 Résumé des suppressions:")
