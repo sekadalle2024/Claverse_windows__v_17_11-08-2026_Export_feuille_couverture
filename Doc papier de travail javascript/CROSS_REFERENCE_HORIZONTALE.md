@@ -289,6 +289,17 @@ crossRefCommands.clearStorage()
 
 **Solution:** Vérifier dans la console les messages de debug `📎 [Cross Ref]`
 
+### Décalage d'alignement ou largeur incorrecte avec Modelised_table
+
+**Symptôme:** Le tableau de cross référence s'arrête à la colonne Ecart ou ses colonnes ne s'alignent pas pixel par pixel avec la grande table de données (Modelised_table), donnant l'impression qu'il est indexé sur le *Schéma de calcul*.
+
+**Explication & Solution Historique (Juin 2026):**
+Ce problème provenait de deux conflits fondamentaux:
+1. **Conflit de Ciblage:** La présence de mots-clés comme "Montant" et "Ecart" dans les entêtes du "Schéma de calcul" induisait le système en erreur, qui ciblait la mauvaise table (plus petite). La solution a été d'implémenter une recherche inversée (`reverse`) et d'exclure sciemment le Schéma de calcul en identifiant les headers `(A)`, `(B)` et les petits tableaux (<= 3 lignes).
+2. **Conflit de Largeur (Overflow CSS):** Lors de l'application de pourcentages et de la lecture via `getBoundingClientRect().width`, le conteneur écrasait la table de cross-ref sur l'écran (ex: 800px) alors que la vraie table `Modelised_table` défilait horizontalement (ex: 1200px réels). La solution a été d'abandonner le ratio/pourcentage et d'imposer un paramétrage strict:
+   - `width: max-content` pour permettre à la table de cross référence de s'étendre
+   - Application directe et individuelle des pixels via `width`, `min-width` et `max-width` (couplé à un `box-sizing: border-box`) pour chaque cellule `<td>` générée, en se calquant exactement sur les colonnes du `tbody` de la table principale.
+
 ### Le nombre de colonnes est incorrect
 
 **Cause:** La nature de test n'est pas correctement détectée
