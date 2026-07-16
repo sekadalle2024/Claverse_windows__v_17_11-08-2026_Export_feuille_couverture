@@ -1,4 +1,5 @@
 import { StrictMode } from 'react';
+import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
@@ -9,6 +10,25 @@ import './styles/animations.css'; // Import animations
 import './services/menuIntegration'; // Import menu integration service
 import './services/autoRestore'; // Import auto-restore service
 import { initializeTheme, applyTheme } from './utils/themeManager';
+import { initializeScreenMode } from './utils/screenManager';
+import EchantillonnageAccordionRenderer from './components/Clara_Components/EchantillonnageAccordionRenderer';
+
+// ─── Expose React accordion mount for EchantillonnageAutoTrigger.js ───────────
+(window as any).__CLARAVERSE_MOUNT_ECHANTILLONNAGE__ = (
+  mountNode: HTMLElement,
+  data: any,
+  isDark?: boolean
+) => {
+  try {
+    const root = createRoot(mountNode);
+    root.render(
+      React.createElement(EchantillonnageAccordionRenderer, { data, isDark: isDark ?? false })
+    );
+    console.log('✅ [Échantillonnage] Composant React accordéon monté dans le DOM');
+  } catch (err) {
+    console.error('❌ [Échantillonnage] Erreur montage React:', err);
+  }
+};
 
 // FORCE remove dark class immediately
 document.documentElement.classList.remove('dark');
@@ -35,6 +55,12 @@ setTimeout(() => {
 
 // Setup global error handlers for unhandled promise rejections and JS errors
 setupGlobalErrorHandlers();
+
+// Initialize screen mode (wide/normal) from saved preferences
+// Delayed to ensure DOM is ready and tables have been rendered
+setTimeout(() => {
+  initializeScreenMode();
+}, 500);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

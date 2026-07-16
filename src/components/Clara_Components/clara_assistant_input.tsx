@@ -3053,8 +3053,8 @@ const ClaraAssistantInput: React.FC<ClaraInputProps> = ({
     const processedAttachments = await claraAttachmentService.processFileAttachments(attachments);
     
     // Show extraction confirmation if any files were processed
-    // 🔕 NOTIFICATIONS DÉSACTIVÉES TEMPORAIREMENT (06/05/2026)
-    // Pour réactiver, voir: Doc ClaraAttachmentService traitement/GUIDE_REACTIVATION_NOTIFICATIONS.md
+    // 🔕 NOTIFICATIONS DÉSACTIVÉES TEMPORAIREMENT (23/06/2026)
+    // Pour réactiver, voir: Doc notification app/MEMO_REACTIVATION_NOTIFICATIONS_23_JUIN_2026.md
     /*
     const hasDocuments = processedAttachments.some(att => 
       (att.type === 'excel' || att.type === 'word' || att.type === 'document') 
@@ -3995,7 +3995,7 @@ You can right-click on the image to save it or use it in your projects.`;
         <div className="absolute inset-0 bg-sakura-500/10 border-2 border-dashed border-sakura-500 rounded-xl z-30 pointer-events-none" />
       )}
 
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-4xl mx-auto" data-widescreen-target="container">
         {/* Positionnement au maximum vers le bas - Style Grok */}
         <div className="pb-6 pt-16 flex justify-center">
           <div className="max-w-3xl w-full relative">

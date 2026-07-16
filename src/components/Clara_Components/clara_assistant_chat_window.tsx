@@ -785,7 +785,7 @@ const ClaraChatWindow: React.FC<ClaraChatWindowProps> = ({
       className="flex-1 overflow-y-auto p-6 relative"
       style={{ scrollBehavior: 'auto' }} // Let our custom scroller handle smooth behavior
     >
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-4xl mx-auto" data-widescreen-target="container">
         {/* Loading screen when Clara is initializing */}
         {isInitializing ? (
           <LoadingScreen />

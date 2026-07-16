@@ -25,6 +25,7 @@ import GuideCommandesAccordionRenderer from './GuideCommandesAccordionRenderer';
 import MethodoRevisionAccordionRenderer from './MethodoRevisionAccordionRenderer';
 import HeatmapRisqueAccordionRenderer from './HeatmapRisqueAccordionRenderer';
 import PapierTravailRenderer from './PapierTravailRenderer';
+import EchantillonnageAccordionRenderer from './EchantillonnageAccordionRenderer';
 
 // Import Chart.js components
 import {
@@ -1320,6 +1321,24 @@ const MessageContentRenderer: React.FC<MessageContentRendererProps> = React.memo
       );
     } catch (e) {
       console.error('Failed to parse Papier de Travail data:', e);
+    }
+  }
+
+  // ========================================================================
+  // SPECIAL FORMAT HANDLING: Echantillonnage Audit Accordion
+  // ========================================================================
+  if (processedContent.content.startsWith('__ECHANTILLONNAGE_AUDIT__')) {
+    try {
+      const jsonStr = processedContent.content.replace('__ECHANTILLONNAGE_AUDIT__', '');
+      const echantillonnageData = JSON.parse(jsonStr);
+      return (
+        <div className={`echantillonnage-audit-container ${className}`}>
+          <EchantillonnageAccordionRenderer data={echantillonnageData} isDark={darkMode} />
+        </div>
+      );
+    } catch (e) {
+      console.error('Failed to parse Echantillonnage Audit data:', e);
+      // Fall back to standard rendering if parsing fails
     }
   }
 

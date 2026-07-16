@@ -4,6 +4,7 @@ import { useTheme, ThemeMode } from '../hooks/useTheme';
 import UserProfileButton from './common/UserProfileButton';
 import NotificationPanel from './common/NotificationPanel';
 import ThemeSelector from './ThemeSelector';
+import ScreenSelector from './ScreenSelector';
 import { db } from '../db';
 import logo from "../assets/logo.png";
 
@@ -130,6 +131,9 @@ const Topbar = ({ userName, onPageChange, projectTitle, showProjectTitle = false
         )}
       </div>
       <div className="flex items-center gap-6">
+        {/* Sélecteur de mode écran (Wide / Normal) */}
+        <ScreenSelector showLabel={false} />
+        
         {/* Sélecteur de thème avec icônes */}
         <ThemeSelector showLabel={false} />
         

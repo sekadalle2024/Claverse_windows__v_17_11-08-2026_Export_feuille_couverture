@@ -41,6 +41,7 @@ export class ClaraApiService {
   private readonly SENTINEL_ETAT_FIN = "__INTERNAL__ETAT_FIN__";
   private readonly SENTINEL_TEMPLATE_TABLE = "__INTERNAL__TEMPLATE_TABLE__";
   private readonly SENTINEL_EDITEUR = "__INTERNAL__EDITEUR__";
+  private readonly SENTINEL_DATA_ANALYST = "__INTERNAL__DATA_ANALYST__";
 
   /**
    * Router n8n – Switch-case JavaScript avec informations de routing
@@ -163,6 +164,26 @@ export class ClaraApiService {
     else if (msg.includes("Revue analytique")) {
       routeKey = "revue_analytique";
       caseName = "Case 46";
+    }
+    
+    // Case 48: Plan audit
+    else if (msg.includes("Plan_audit")) {
+      routeKey = "plan_audit";
+      caseName = "Case 48";
+    }
+    
+    // Case 49: Programme de travail
+    else if (msg.includes("Programme de travail") || msg.includes("/Programme de travail") || msg.includes("programme de travail")) {
+      routeKey = "programme_travail";
+      caseName = "Case 49";
+    }
+    
+    // Case 50: Data analyst (Échantillonnage Audit - Toutes méthodes)
+    else if (
+      msg.includes("Data analyst") || msg.includes("Data Analyst")
+    ) {
+      routeKey = "data_analyst_aleatoire_simple";
+      caseName = "Case 50";
     }
     
     // Cases 35-43: Templates de tables (génération locale)
@@ -302,6 +323,12 @@ export class ClaraApiService {
         return "https://n8nsqlite.zeabur.app/webhook/leadsheet";
       case "revue_analytique":
         return "https://n8nsqlite.zeabur.app/webhook/revue_analytique";
+      case "plan_audit":
+        return "https://n8nsqlite.zeabur.app/webhook/plan_audit";
+      case "programme_travail":
+        return "https://fpb7ab9h.rpcl.app/webhook-test/integration";
+      case "data_analyst_aleatoire_simple":
+        return this.SENTINEL_DATA_ANALYST;
       case "recos_controle_interne":
         return "https://n8nsqlite.zeabur.app/webhook/recos_contrôle_interne_comptable";
       case "recos_revision_comptes":
@@ -1245,6 +1272,115 @@ export class ClaraApiService {
     }
 
     // ========================================================================
+    // FORMAT CASE 49 (Programme de travail): Array avec "output" contenant JSON dans markdown
+    // Exemple: [{ "output": "`json\n{...}\n```" }]
+    // ========================================================================
+    if (Array.isArray(result) && result.length > 0) {
+      const firstItem = result[0];
+      
+      if (firstItem && typeof firstItem === "object" && "output" in firstItem) {
+        const outputContent = firstItem.output;
+        
+        // Vérifier si output contient du JSON dans un bloc markdown OU commence par `json
+        if (typeof outputContent === "string" && 
+            (outputContent.includes("```json") || outputContent.trim().startsWith("`json"))) {
+          console.log("🔧 FORMAT CASE 49 DETECTE: output avec JSON dans bloc markdown");
+          
+          try {
+            let cleanedOutput = outputContent;
+            
+            // Étape 1: Retirer le backtick unique initial si présent (ex: "`json")
+            if (cleanedOutput.trim().startsWith("`json")) {
+              cleanedOutput = cleanedOutput.trim().substring(5); // Retire "`json"
+              console.log("🧹 Backtick simple initial retiré");
+            }
+            
+            // Étape 2: Retirer les triples backticks (```json et ```)
+            cleanedOutput = cleanedOutput.replace(/^```json\s*/gm, '').replace(/```\s*$/gm, '').trim();
+            
+            // Étape 3: Retirer les backticks résiduels au début et à la fin
+            cleanedOutput = cleanedOutput.replace(/^`+/, '').replace(/`+$/, '').trim();
+            
+            console.log("📊 Contenu nettoyé (premiers 500 caractères):", cleanedOutput.substring(0, 500));
+            
+            // Étape 4: Parser le JSON
+            const parsedData = JSON.parse(cleanedOutput);
+            
+            console.log("✅ JSON parsé avec succès");
+            console.log("📊 Structure:", {
+              type: typeof parsedData,
+              keys: Object.keys(parsedData),
+              firstKey: Object.keys(parsedData)[0]
+            });
+            
+            // Remplacer result par les données parsées pour le traitement normal
+            result = [{ data: parsedData }];
+            
+            console.log("🔄 Données transformées pour traitement FORMAT 4");
+          } catch (parseError) {
+            console.error("❌ Erreur lors du parsing JSON depuis output:", parseError);
+            console.error("📄 Contenu brut problématique:", outputContent.substring(0, 1000));
+            
+            // Fallback: retourner l'erreur avec le contenu brut pour debug
+            return {
+              content: `**Erreur de parsing JSON**\n\nLe serveur a retourné des données mais le format JSON est invalide.\n\n**Détails de l'erreur:**\n${parseError instanceof Error ? parseError.message : String(parseError)}\n\n**Contenu brut (premiers 500 caractères):**\n\`\`\`\n${outputContent.substring(0, 500)}\n\`\`\``,
+              metadata: {
+                error: "JSON parse error",
+                format: "case49_output_markdown_error",
+                rawContentPreview: outputContent.substring(0, 200)
+              }
+            };
+          }
+        }
+      }
+    }
+
+    // ========================================================================
+    // FORMAT NEW: Response containing "markdown" key (direct or in array)
+    // ========================================================================
+    if (Array.isArray(result) && result.length > 0) {
+      const firstItem = result[0];
+      if (firstItem && typeof firstItem === "object" && "markdown" in firstItem) {
+        console.log('✅ FORMAT NEW (Array): Réponse avec "markdown"');
+        contentToDisplay = String(firstItem.markdown || "");
+        
+        // 🔧 DÉTECTION PAPIER DE TRAVAIL MARKDOWN
+        if (claraPapierTravailService.detectPapierTravail(contentToDisplay)) {
+          console.log("📋 === PAPIER DE TRAVAIL DÉTECTÉ DANS MARKDOWN (FORMAT NEW) ===");
+          contentToDisplay = claraPapierTravailService.process(contentToDisplay);
+        }
+
+        metadata = {
+          format: "markdown_response",
+          timestamp: firstItem.timestamp || new Date().toISOString(),
+          tables_found: firstItem.tableCount || 0,
+          totalItems: result.length,
+        };
+        console.log("🔍 === FIN ANALYSE (FORMAT NEW - Array markdown) ===");
+        return { content: contentToDisplay, metadata };
+      }
+    }
+
+    if (result && typeof result === "object" && !Array.isArray(result) && "markdown" in result) {
+      console.log('✅ FORMAT NEW (Object): Réponse avec "markdown"');
+      contentToDisplay = String(result.markdown || "");
+      
+      // 🔧 DÉTECTION PAPIER DE TRAVAIL MARKDOWN
+      if (claraPapierTravailService.detectPapierTravail(contentToDisplay)) {
+        console.log("📋 === PAPIER DE TRAVAIL DÉTECTÉ DANS MARKDOWN (FORMAT NEW) ===");
+        contentToDisplay = claraPapierTravailService.process(contentToDisplay);
+      }
+
+      metadata = {
+        format: "markdown_response",
+        timestamp: result.timestamp || new Date().toISOString(),
+        tables_found: result.tableCount || 0,
+      };
+      console.log("🔍 === FIN ANALYSE (FORMAT NEW - Object markdown) ===");
+      return { content: contentToDisplay, metadata };
+    }
+
+    // ========================================================================
     // FORMAT 7: METHODO REVISION — Array with "Sous-section" / "Sub-items"
     // Can be direct or wrapped in "[CADRAGE PEDAGOGIQUE]" section
     // ========================================================================
@@ -1558,6 +1694,101 @@ export class ClaraApiService {
                 cartographieKey: cartographieKey,
                 endpoint: "heatmap_risque",
               },
+            };
+          }
+        }
+      }
+    }
+
+    // ========================================================================
+    // FORMAT 9: NOUVEAU FORMAT CIA (Case 49 style) — Array with "output" containing "Sous-section" structure
+    // Exemple: [{ "output": "`json\n{\"Sous-section A\": \"...\", \"Sub-items\": [...]}\n```" }]
+    // ========================================================================
+    if (Array.isArray(result) && result.length > 0) {
+      const firstItem = result[0];
+      
+      if (firstItem && typeof firstItem === "object" && "output" in firstItem) {
+        const outputContent = firstItem.output;
+        
+        // Vérifier si output contient du JSON dans un bloc markdown avec structure Sous-section
+        if (typeof outputContent === "string" && 
+            (outputContent.includes("```json") || outputContent.trim().startsWith("`json"))) {
+          console.log("🔧 FORMAT 9 NOUVEAU CIA: output avec JSON Sous-section dans bloc markdown");
+          
+          try {
+            let cleanedOutput = outputContent;
+            
+            // Étape 1: Retirer le backtick unique initial si présent (ex: "`json")
+            if (cleanedOutput.trim().startsWith("`json")) {
+              cleanedOutput = cleanedOutput.trim().substring(5); // Retire "`json"
+              console.log("🧹 Backtick simple initial retiré");
+            }
+            
+            // Étape 2: Retirer les triples backticks (```json et ```)
+            cleanedOutput = cleanedOutput.replace(/^```json\s*/gm, '').replace(/```\s*$/gm, '').trim();
+            
+            // Étape 3: Retirer les backticks résiduels au début et à la fin
+            cleanedOutput = cleanedOutput.replace(/^`+/, '').replace(/`+$/, '').trim();
+            
+            console.log("📊 Contenu nettoyé (premiers 500 caractères):", cleanedOutput.substring(0, 500));
+            
+            // Étape 4: Parser le JSON
+            const parsedData = JSON.parse(cleanedOutput);
+            
+            console.log("✅ JSON parsé avec succès");
+            console.log("📊 Structure:", {
+              type: typeof parsedData,
+              keys: Object.keys(parsedData),
+              firstKey: Object.keys(parsedData)[0]
+            });
+            
+            // Vérifier si c'est une structure avec "Sous-section" et "Sub-items"
+            if (parsedData && typeof parsedData === "object" && "Sous-section" in parsedData) {
+              console.log("✅ FORMAT 9 CIA DETECTE: Structure Sous-section/Sub-items trouvée");
+              
+              // Convertir en array si nécessaire (attendu par CiaAccordionRenderer)
+              const dataArray = Array.isArray(parsedData) ? parsedData : [parsedData];
+              
+              // Déterminer le type basé sur le contenu
+              const firstSection = dataArray[0]["Sous-section"] || "";
+              const isMethodoAudit = firstSection.toLowerCase().includes("étape") || 
+                                     firstSection.toLowerCase().includes("etape") ||
+                                     firstSection.toLowerCase().includes("rôle");
+              
+              const content = isMethodoAudit 
+                ? `__CIA_METHODO_ACCORDION__${JSON.stringify(dataArray)}`
+                : `__CIA_ACCORDION__${JSON.stringify(dataArray)}`;
+              
+              console.log(`🔍 === FIN ANALYSE (FORMAT 9 - ${isMethodoAudit ? 'METHODO AUDIT' : 'CIA COURS'} depuis markdown) ===`);
+              return {
+                content,
+                metadata: {
+                  format: isMethodoAudit ? "cia_methodo_accordion" : "cia_accordion",
+                  timestamp: new Date().toISOString(),
+                  totalSections: dataArray.length,
+                  endpoint: isMethodoAudit ? "methodo_audit" : "cia_cours_gemini",
+                  extractedFromMarkdown: true,
+                  newFormat: true,
+                }
+              };
+            }
+            
+            // Si pas de structure Sous-section, continuer avec le traitement FORMAT 4 existant
+            console.log("⚠️ Pas de structure Sous-section détectée, traitement FORMAT 4");
+            result = [{ data: parsedData }];
+            
+          } catch (parseError) {
+            console.error("❌ Erreur lors du parsing JSON depuis output (FORMAT 9):", parseError);
+            console.error("📄 Contenu brut problématique:", outputContent.substring(0, 1000));
+            
+            // Fallback: retourner l'erreur avec le contenu brut pour debug
+            return {
+              content: `**Erreur de parsing JSON (FORMAT 9)**\n\nLe serveur a retourné des données mais le format JSON est invalide.\n\n**Détails de l'erreur:**\n${parseError instanceof Error ? parseError.message : String(parseError)}\n\n**Contenu brut (premiers 500 caractères):**\n\`\`\`\n${outputContent.substring(0, 500)}\n\`\`\``,
+              metadata: {
+                error: "JSON parse error",
+                format: "nouveau_cia_output_markdown_error",
+                rawContentPreview: outputContent.substring(0, 200)
+              }
             };
           }
         }
@@ -1978,6 +2209,101 @@ export class ClaraApiService {
             model: "local",
             caseName: "Case 44",
             routeKey: "editeur"
+          },
+        };
+      }
+
+      // ── Case 50 : Data analyst – Échantillonnage Audit & Calcul de taille ──────
+      if (resolvedEndpoint === this.SENTINEL_DATA_ANALYST) {
+        console.log("🎲 [Data analyst] Démarrage du processus - Déclenchement automatique");
+        
+        const userMsg = message;
+        
+        // Déterminer la méthode d'échantillonnage
+        let method = "random";
+        let methodLabel = "Aléatoire simple";
+        let emoji = "🎲";
+        
+        if (userMsg.includes("Systématique") || userMsg.includes("systématique")) {
+          method = "systematic";
+          methodLabel = "Systématique";
+          emoji = "📏";
+        } else if (userMsg.includes("Monétaire") || userMsg.includes("monétaire") || userMsg.includes("MUS") || userMsg.includes("mus")) {
+          method = "monetary";
+          methodLabel = "Monétaire (MUS)";
+          emoji = "💰";
+        } else if (userMsg.includes("Stratifié") || userMsg.includes("stratifié")) {
+          method = "stratified";
+          methodLabel = "Stratifié";
+          emoji = "📊";
+        } else if (userMsg.includes("Enregistrements fixes") || userMsg.includes("enregistrements fixes") || userMsg.includes("Enregistrement fixe") || userMsg.includes("enregistrement fixe")) {
+          method = "fixed";
+          methodLabel = "Enregistrements fixes";
+          emoji = "📌";
+        } else if (userMsg.includes("Avec remise") || userMsg.includes("avec remise")) {
+          method = "with_replacement";
+          methodLabel = "Avec remise";
+          emoji = "🔄";
+        } else if (userMsg.includes("Calculer taille") || userMsg.includes("calculer taille")) {
+          method = "calculate-size";
+          methodLabel = "Calculer taille échantillon";
+          emoji = "📐";
+        }
+
+        // Extraire la taille d'échantillon depuis [Nb lignes] si présente
+        const nbLignesMatch = userMsg.match(/\[Nb lignes\]\s*=\s*(\d+)/i) || 
+                              userMsg.match(/Nb lignes\s*[=:]\s*(\d+)/i);
+        const sampleSizeHint = nbLignesMatch ? parseInt(nbLignesMatch[1], 10) : null;
+        
+        // Extraire la colonne cible depuis [Colonne cible] si présente
+        const colonneCibleMatch = userMsg.match(/\[Colonne cible\]\s*=\s*([^\[\n]+)/i) || 
+                                   userMsg.match(/Colonne cible\s*[=:]\s*([^\[\n]+)/i);
+        const colonneCibleHint = colonneCibleMatch ? colonneCibleMatch[1].trim() : null;
+
+        // Extraire l'intervalle si présent (pour systématique)
+        const intervalMatch = userMsg.match(/\[Intervalle\]\s*=\s*(\d+)/i) || 
+                             userMsg.match(/Intervalle\s*[=:]\s*(\d+)/i);
+        const intervalHint = intervalMatch ? parseInt(intervalMatch[1], 10) : null;
+
+        // Extraire les indices d'enregistrements fixes si présents (format [0, 5, 10])
+        const fixedMatch = userMsg.match(/\[Enregistrements fixes\]\s*=\s*\[([^\]]+)\]/i) || 
+                           userMsg.match(/Enregistrements fixes\s*[=:]\s*\[([^\]]+)\]/i);
+        const fixedRecordsHint = fixedMatch ? fixedMatch[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)) : null;
+        
+        // Construire le texte des paramètres pour l'affichage initial
+        let paramsText = "";
+        if (method === "systematic" && intervalHint) {
+          paramsText += ` · Intervalle: ${intervalHint}`;
+        }
+        if (sampleSizeHint) {
+          paramsText += ` · ${sampleSizeHint} lignes`;
+        }
+        if (colonneCibleHint) {
+          paramsText += ` · Colonne: ${colonneCibleHint}`;
+        }
+        if (method === "fixed" && fixedRecordsHint) {
+          paramsText += ` · Indices: [${fixedRecordsHint.join(', ')}]`;
+        }
+        
+        const initialContent =
+          "| Data analyst |\n" +
+          "|--------------|\n" +
+          `| ${emoji} ${methodLabel}${paramsText} · 📂 Sélectionnez votre fichier Excel... |`;
+        
+        return {
+          id: `${Date.now()}-data-analyst`,
+          role: "assistant",
+          content: initialContent,
+          timestamp: new Date(),
+          metadata: { 
+            model: "local",
+            caseName: "Case 50",
+            routeKey: "data_analyst_aleatoire_simple",
+            method: method,
+            sampleSize: sampleSizeHint,
+            interval: intervalHint,
+            fixedRecords: fixedRecordsHint,
+            monetaryColumn: colonneCibleHint
           },
         };
       }
