@@ -1,21 +1,29 @@
 # Guide de Réactivation des Notifications JSON
 
-## 📋 Contexte
+## ❌ Statut Actuel: NOTIFICATIONS DÉSACTIVÉES
 
-Les notifications d'affichage du contenu JSON des fichiers convertis ont été **désactivées temporairement** le **06 mai 2026**.
+**Date de désactivation**: 23 juin 2026
 
-Ces notifications affichaient le contenu JSON des fichiers Excel, Word et PDF après leur conversion dans le chat.
+Les notifications d'affichage du contenu JSON des fichiers convertis ont été **désactivées** le **23 juin 2026**.
+
+Ces notifications n'affichent plus le contenu JSON des fichiers Excel, Word et PDF après leur conversion dans le chat.
+
+## 📋 Historique
+
+- **06 mai 2026**: Désactivation temporaire des notifications
+- **23 juin 2026**: Réactivation des notifications
+- **23 juin 2026**: Nouvelle désactivation des notifications
 
 ## 🔕 Désactivation Actuelle
 
 ### Fichier Modifié
 - **Fichier**: `src/components/Clara_Components/clara_assistant_input.tsx`
 - **Ligne**: ~3056-3064
-- **Méthode**: Commentaire du code d'appel à `showExtractionAlert()`
+- **Statut**: ❌ **Code désactivé** (23 juin 2026)
 
 ### Code Désactivé
 ```typescript
-// 🔕 NOTIFICATIONS DÉSACTIVÉES TEMPORAIREMENT (06/05/2026)
+// 🔕 NOTIFICATIONS DÉSACTIVÉES TEMPORAIREMENT (23/06/2026)
 // Pour réactiver, voir: Doc ClaraAttachmentService traitement/GUIDE_REACTIVATION_NOTIFICATIONS.md
 /*
 const hasDocuments = processedAttachments.some(att => 
@@ -29,7 +37,13 @@ if (hasDocuments) {
 */
 ```
 
-## ✅ Comment Réactiver les Notifications
+## 🔕 Comment Désactiver à Nouveau les Notifications (si nécessaire)
+
+### ❌ Les notifications sont actuellement DÉSACTIVÉES
+
+Les notifications ont déjà été désactivées. Pour les réactiver, suivez les instructions ci-dessous.
+
+## ✅ Comment RÉACTIVER les Notifications
 
 ### Étape 1: Ouvrir le Fichier
 ```bash
@@ -37,17 +51,29 @@ if (hasDocuments) {
 code src/components/Clara_Components/clara_assistant_input.tsx
 ```
 
-### Étape 2: Localiser le Code Commenté
+### Étape 2: Localiser le Code
 - Chercher la ligne contenant: `🔕 NOTIFICATIONS DÉSACTIVÉES TEMPORAIREMENT`
 - Vous devriez être aux alentours de la ligne **3056-3064**
 
 ### Étape 3: Décommenter le Code
-Remplacer le bloc commenté par le code actif :
+Pour réactiver, décommenter le bloc commenté :
 
-**AVANT (désactivé):**
+**ACTIF (actuellement):**
 ```typescript
-// 🔕 NOTIFICATIONS DÉSACTIVÉES TEMPORAIREMENT (06/05/2026)
-// Pour réactiver, voir: Doc ClaraAttachmentService traitement/GUIDE_REACTIVATION_NOTIFICATIONS.md
+// ✅ NOTIFICATIONS RÉACTIVÉES (23/06/2026)
+const hasDocuments = processedAttachments.some(att => 
+  (att.type === 'excel' || att.type === 'word' || att.type === 'document') 
+  && att.processed && att.processingResult?.success
+);
+
+if (hasDocuments) {
+  claraAttachmentService.showExtractionAlert(processedAttachments);
+}
+```
+
+**DÉSACTIVÉ (pour désactiver à nouveau):**
+```typescript
+// 🔕 NOTIFICATIONS DÉSACTIVÉES TEMPORAIREMENT
 /*
 const hasDocuments = processedAttachments.some(att => 
   (att.type === 'excel' || att.type === 'word' || att.type === 'document') 
@@ -60,25 +86,12 @@ if (hasDocuments) {
 */
 ```
 
-**APRÈS (réactivé):**
-```typescript
-// Show extraction confirmation if any files were processed
-const hasDocuments = processedAttachments.some(att => 
-  (att.type === 'excel' || att.type === 'word' || att.type === 'document') 
-  && att.processed && att.processingResult?.success
-);
-
-if (hasDocuments) {
-  claraAttachmentService.showExtractionAlert(processedAttachments);
-}
-```
-
 ### Étape 4: Sauvegarder et Tester
 1. **Sauvegarder** le fichier (`Ctrl+S` ou `Cmd+S`)
-2. **Redémarrer** l'application si nécessaire
+2. **Redémarrer** l'application
 3. **Tester** en envoyant un fichier Excel, Word ou PDF dans le chat
 
-## 📊 Comportement Attendu Après Réactivation
+## 📊 Comportement Actuel (Notifications Actives)
 
 Lorsque vous envoyez un fichier dans le chat, une **alerte de notification** s'affichera avec :
 
@@ -159,5 +172,6 @@ Pour toute question ou problème :
 ---
 
 **Date de création**: 06 mai 2026  
-**Dernière mise à jour**: 06 mai 2026  
-**Version**: 1.0
+**Dernière mise à jour**: 23 juin 2026  
+**Statut**: ✅ Notifications ACTIVES  
+**Version**: 2.0
