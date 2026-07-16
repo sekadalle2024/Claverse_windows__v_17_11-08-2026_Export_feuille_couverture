@@ -622,6 +622,14 @@
         };
       }
 
+      // Confirmations bancaires
+      if (nature.includes("confirmation") || nature.includes("bancaire")) {
+        return {
+          type: "Confirmations bancaires",
+          colonnes: ["(A)", "(B)", "(C)", "(D) = (A) + (B) - (C)", "(E)", "(F)", "(G)", "(H) = (E) + (F) - (G)", "(I) = (D) - (H)"],
+        };
+      }
+
       // Vierge
       if (nature.includes("vierge")) {
         return {

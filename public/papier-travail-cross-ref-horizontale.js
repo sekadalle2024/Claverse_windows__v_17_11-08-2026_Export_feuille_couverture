@@ -209,8 +209,9 @@
       // Trouver la table principale (Modelised_table)
       let tablePrincipale = null;
       
-      debug.log("🔍 Recherche de la table principale...");
-      for (let i = 0; i < tables.length; i++) {
+      debug.log("🔍 Recherche de la table principale (à l'envers)...");
+      // On cherche à l'envers car la table modélisée est presque toujours la dernière table du chat
+      for (let i = tables.length - 1; i >= 0; i--) {
         const table = tables[i];
         if (table === table2) {
           debug.log(`  Table ${i + 1}: ⏭️ Ignorée (c'est la table 2)`);
@@ -229,17 +230,80 @@
         return;
       }
 
-      // Vérifier si une cross référence existe déjà
-      if (this.processedTables.has(tablePrincipale)) {
-        debug.warn("⚠️ Cross référence déjà créée pour cette table");
+      // Vérifier si une cross référence existe déjà dans le DOM
+      const existingCrossRef = this.findExistingCrossRef(tablePrincipale);
+      if (existingCrossRef) {
+        debug.warn("⚠️ Cross référence existe déjà dans le DOM");
         return;
       }
 
-      // Créer la cross référence horizontale
-      debug.log("🎯 Création de la cross référence horizontale...");
-      this.createCrossRefHorizontale(tablePrincipale, natureDeTest, div);
-      this.processedTables.add(tablePrincipale);
-      debug.log("✅ [FIN] Cross référence créée avec succès!");
+      // Check if a saved cross-reference exists in localStorage for this table
+      const allData = this.loadAllData();
+      const tableId = tablePrincipale.dataset.tableId || this.generateTableId(tablePrincipale);
+      
+      // Find if there is a saved entry for this table
+      const savedEntry = Object.values(allData).find(entry => entry.forTable === tableId);
+      
+      if (savedEntry) {
+        debug.log("🎯 Restauration d'une cross référence sauvegardée...");
+        this.createCrossRefHorizontale(tablePrincipale, natureDeTest, div);
+        this.restoreAllCrossRefs(); // Restore values from localStorage
+      } else {
+        debug.log("⏭️ Pas de cross référence sauvegardée. Pas de création automatique.");
+      }
+    }
+
+    /**
+     * Créer programmatiquement une cross référence pour une table (depuis le menu contextuel)
+     */
+    createCrossRefForTable(tablePrincipale, natureDeTest) {
+      const parentDiv = tablePrincipale.closest('div.prose, div[class*="prose"]');
+      if (!parentDiv) {
+        debug.error("Parent div not found for table");
+        return null;
+      }
+      
+      const crossRefTable = this.createCrossRefHorizontale(tablePrincipale, natureDeTest, parentDiv);
+      if (crossRefTable) {
+        this.saveCrossRefDataNow(crossRefTable);
+        return crossRefTable;
+      }
+      return null;
+    }
+
+    /**
+     * Supprimer programmatiquement une cross référence (depuis le menu contextuel)
+     */
+    deleteCrossRefForTable(tablePrincipale) {
+      const tableId = tablePrincipale.dataset.tableId || this.generateTableId(tablePrincipale);
+      const existingCrossRef = this.findExistingCrossRef(tablePrincipale);
+      
+      if (existingCrossRef) {
+        // Find wrapper and remove it if it exists
+        const parentNode = existingCrossRef.parentNode;
+        const globalDiv = tablePrincipale.closest('div.prose, div[class*="prose"]');
+        if (parentNode && parentNode !== globalDiv && parentNode.tagName === "DIV") {
+          parentNode.remove();
+        } else {
+          existingCrossRef.remove();
+        }
+      }
+      
+      // Remove from localStorage
+      const allData = this.loadAllData();
+      let found = false;
+      
+      for (const crossRefId in allData) {
+        if (allData[crossRefId].forTable === tableId) {
+          delete allData[crossRefId];
+          found = true;
+        }
+      }
+      
+      if (found) {
+        this.saveAllData(allData);
+        debug.log(`🗑️ Données de cross référence supprimées pour la table ${tableId}`);
+      }
     }
 
     /**
@@ -309,12 +373,21 @@
     isModelizedTable(table) {
       const headers = this.getTableHeaders(table);
       
+      // Exclure explicitement le "Schéma de calcul" (qui a (A), (B) et peu de lignes)
+      const isSchema = headers.some(h => /^\([A-Z]\)/.test(h.trim()));
+      const numRows = table.querySelectorAll("tr").length;
+      
+      if (isSchema && numRows <= 3) {
+        return false; // C'est le schéma de calcul, pas la Modelised_table
+      }
+      
       return headers.some(header => {
         const h = header.toLowerCase().trim();
         if (h === "conclusion") return true;
         if (h === "assertion") return true;
         if (/^ctr\d*$/i.test(h)) return true;
-        if (h.includes("ecart") || h.includes("écart") || h.includes("montant")) return true;
+        // On n'accepte Ecart/Montant que si ce n'est pas le schéma de calcul
+        if ((h.includes("ecart") || h.includes("écart") || h.includes("montant")) && !isSchema) return true;
         
         return false;
       });
@@ -324,9 +397,22 @@
      * Obtenir les en-têtes d'une table
      */
     getTableHeaders(table) {
+      // Pour éviter de compter les en-têtes multiples (rowspan/colspan),
+      // on privilégie la dernière ligne du thead qui contient généralement les colonnes finales.
+      const thead = table.querySelector("thead");
+      if (thead) {
+        const rows = thead.querySelectorAll("tr");
+        const lastRow = rows[rows.length - 1];
+        if (lastRow) {
+          const headers = lastRow.querySelectorAll("th, td");
+          if (headers.length > 0) {
+            return Array.from(headers).map((cell) => cell.textContent.trim());
+          }
+        }
+      }
+
+      // Fallbacks
       const headerSelectors = [
-        "thead th",
-        "thead td",
         "tr:first-child th",
         "tr:first-child td",
       ];
@@ -343,46 +429,148 @@
 
     /**
      * Trouver l'index de la colonne "Ecart" dans une table
+     * Cherche dans TOUTES les lignes thead en tenant compte des colspans
      */
     findEcartColumnIndex(table) {
-      const headers = this.getTableHeaders(table);
-      
-      for (let i = 0; i < headers.length; i++) {
-        const h = headers[i].toLowerCase().trim();
-        if (h.includes("ecart") || h.includes("écart") || h.includes("montant")) {
-          debug.log(`📎 [Alignement] Colonne "Ecart" trouvée à l'index ${i}`);
-          return i;
+      // ----------------------------------------------------------------
+      // PRIORITÉ 1: Chercher dans toutes les lignes du thead
+      // en tenant compte des colspans pour calculer le vrai index de colonne
+      // ----------------------------------------------------------------
+      const theadRows = table.querySelectorAll("thead tr");
+      for (let r = 0; r < theadRows.length; r++) {
+        const cells = theadRows[r].querySelectorAll("th, td");
+        let colIndex = 0;
+        for (let c = 0; c < cells.length; c++) {
+          const text = cells[c].textContent.trim().toLowerCase();
+          if (text === "ecart" || text === "écart" || text.includes("ecart") || text.includes("écart")) {
+            debug.log(`📎 [Alignement] Colonne "Ecart" trouvée à l'index ${colIndex} (ligne thead ${r})`);
+            return colIndex;
+          }
+          colIndex += parseInt(cells[c].getAttribute("colspan") || "1", 10);
         }
       }
-      
+
+      // ----------------------------------------------------------------
+      // PRIORITÉ 2: Chercher dans les lignes de données tbody
+      // (fallback pour tables sans thead)
+      // ----------------------------------------------------------------
+      const tbodyRows = table.querySelectorAll("tbody tr");
+      for (let r = 0; r < tbodyRows.length; r++) {
+        const cells = tbodyRows[r].querySelectorAll("th, td");
+        let colIndex = 0;
+        for (let c = 0; c < cells.length; c++) {
+          const text = cells[c].textContent.trim().toLowerCase();
+          if (text === "ecart" || text === "écart") {
+            debug.log(`📎 [Alignement] Colonne "Ecart" trouvée à l'index ${colIndex} (ligne tbody ${r})`);
+            return colIndex;
+          }
+          colIndex += parseInt(cells[c].getAttribute("colspan") || "1", 10);
+        }
+      }
+
       debug.warn("📎 [Alignement] Colonne 'Ecart' non trouvée");
       return -1;
     }
 
     /**
-     * Calculer le nombre de colonnes vides à ajouter avant les références
+     * Mesurer les colonnes réelles de la table principale
+     * - totalColumns = nombre réel de colonnes (max colspan-expandé sur TOUTES les lignes)
+     * - widthsPx = largeurs individuelles depuis une ligne tbody propre
+     * - tableWidthPx = largeur totale du tableau en px
      */
-    calculateEmptyColumnsCount(tablePrincipale, nbColonnes) {
-      const totalColumns = this.getTableHeaders(tablePrincipale).length;
-      const ecartIndex = this.findEcartColumnIndex(tablePrincipale);
-      
-      debug.log(`📎 [Alignement] Total colonnes table: ${totalColumns}`);
-      debug.log(`📎 [Alignement] Index colonne Ecart: ${ecartIndex}`);
-      debug.log(`📎 [Alignement] Nombre de références: ${nbColonnes}`);
-      
-      if (ecartIndex === -1) {
-        // Pas de colonne Ecart, aligner à droite
-        const emptyColumns = totalColumns - nbColonnes;
-        debug.log(`📎 [Alignement] Pas d'Ecart, alignement à droite: ${emptyColumns} colonnes vides`);
-        return Math.max(0, emptyColumns);
+    measureRealColumns(tablePrincipale) {
+      let maxCols = 0;
+      const allRows = tablePrincipale.querySelectorAll("tr");
+      allRows.forEach(row => {
+        let colCount = 0;
+        row.querySelectorAll("th, td").forEach(cell => {
+          colCount += parseInt(cell.getAttribute("colspan") || "1", 10);
+        });
+        if (colCount > maxCols) maxCols = colCount;
+      });
+      if (maxCols === 0) maxCols = 5;
+
+      debug.log(`📎 [measureRealColumns] Vrai nb colonnes: ${maxCols}`);
+
+      let bestRow = null;
+      let bestRowCount = 0;
+      let bestRowIsTbody = false;
+
+      for (let r = 0; r < allRows.length; r++) {
+        const cells = allRows[r].querySelectorAll("th, td");
+        if (cells.length === 0) continue;
+        
+        let hasColspan = false;
+        for (let c = 0; c < cells.length; c++) {
+          if (parseInt(cells[c].getAttribute("colspan") || "1", 10) > 1) {
+            hasColspan = true;
+            break;
+          }
+        }
+        
+        if (!hasColspan) {
+           const isTbody = allRows[r].parentNode && allRows[r].parentNode.tagName.toLowerCase() === 'tbody';
+           if (cells.length > bestRowCount || (cells.length === bestRowCount && isTbody && !bestRowIsTbody)) {
+              bestRowCount = cells.length;
+              bestRow = cells;
+              bestRowIsTbody = isTbody;
+           }
+        }
       }
-      
-      // Aligner pour que la dernière référence soit sur la colonne Ecart
-      const emptyColumns = ecartIndex - nbColonnes + 1;
-      
-      debug.log(`📎 [Alignement] Formule: ${ecartIndex} - ${nbColonnes} + 1 = ${emptyColumns}`);
-      
-      return Math.max(0, emptyColumns);
+
+      if (bestRow && bestRowCount > 0) {
+        const widths = Array.from(bestRow).map(cell => cell.getBoundingClientRect().width);
+        const sum = widths.reduce((s, w) => s + w, 0);
+
+        if (sum > 0) {
+          if (bestRowCount === maxCols) {
+            debug.log(`📎 [measureRealColumns] Mesure exacte: ${maxCols} colonnes, sum: ${sum}px`);
+            return { count: maxCols, widthsPx: widths, tableWidthPx: sum };
+          }
+
+          if (bestRowCount < maxCols) {
+            const avgColWidth = sum / bestRowCount;
+            const extraCols = maxCols - bestRowCount;
+            const allWidths = [...widths, ...Array(extraCols).fill(avgColWidth)];
+            const totalW = allWidths.reduce((s, w) => s + w, 0);
+            
+            debug.log(`📎 [measureRealColumns] Extrapolation: ${bestRowCount} + ${extraCols} = ${maxCols}`);
+            return { count: maxCols, widthsPx: allWidths, tableWidthPx: totalW };
+          }
+        }
+      }
+
+      const tableWidthPx = tablePrincipale.getBoundingClientRect().width;
+      return {
+        count: maxCols,
+        widthsPx: Array(maxCols).fill(tableWidthPx / maxCols),
+        tableWidthPx
+      };
+    }
+
+    /**
+     * Calculer le nombre de colonnes vides à ajouter avant les références
+     * Utilise totalColumns réel (depuis measureRealColumns) et ecartIndex
+     */
+    calculateEmptyColumnsCount(tablePrincipale, nbColonnes, totalColumnsReal) {
+      const ecartIndex = this.findEcartColumnIndex(tablePrincipale);
+      const total = totalColumnsReal || this.getTableHeaders(tablePrincipale).length || 5;
+
+      debug.log(`📎 [Alignement] Total colonnes réel: ${total}`);
+      debug.log(`📎 [Alignement] Index colonne Ecart: ${ecartIndex}`);
+      debug.log(`📎 [Alignement] Nombre de références modèle: ${nbColonnes}`);
+
+      if (ecartIndex >= 0) {
+        // Aligner pour que la DERNIÈRE référence tombe sur la colonne Ecart
+        const empty = ecartIndex - nbColonnes + 1;
+        debug.log(`📎 [Alignement] Formule Ecart: ${ecartIndex} - ${nbColonnes} + 1 = ${empty}`);
+        return Math.max(0, empty);
+      } else {
+        // Pas de colonne Ecart: placer les références à droite
+        const empty = total - nbColonnes;
+        debug.log(`📎 [Alignement] Pas d'Ecart, placement droite: ${empty}`);
+        return Math.max(0, empty);
+      }
     }
 
     /**
@@ -396,29 +584,93 @@
       
       if (!modele) {
         debug.warn(`Aucun modèle trouvé pour: ${natureDeTest}`);
-        return;
+        return null;
       }
 
       // Vérifier si une cross référence existe déjà
       const existingCrossRef = this.findExistingCrossRef(tablePrincipale);
       if (existingCrossRef) {
         debug.log("Cross référence déjà existante");
-        return;
+        return existingCrossRef;
+      }
+
+      // Trouver table2 pour la référence (Recherche élargie)
+      let table2 = null;
+
+      // 1. Recherche locale (div.prose)
+      const globalDiv = tablePrincipale.closest('div.prose, div[class*="prose"]') || parentDiv;
+      if (globalDiv) {
+        const tables = globalDiv.querySelectorAll("table");
+        for (let i = 0; i < tables.length; i++) {
+          if (this.extractNatureDeTest(tables[i])) {
+            table2 = tables[i];
+            break;
+          }
+        }
+      }
+
+      // 2. Recherche étendue au chat (si non trouvé localement)
+      if (!table2) {
+        const chatContainer = tablePrincipale.closest('.overflow-y-auto, [class*="overflow-y-auto"]')
+                           || tablePrincipale.closest('.flex-1')
+                           || tablePrincipale.closest('[class*="chat"]');
+        if (chatContainer) {
+          const allTables = chatContainer.querySelectorAll("table");
+          for (let i = 0; i < allTables.length; i++) {
+            if (this.extractNatureDeTest(allTables[i])) {
+              table2 = allTables[i];
+              break;
+            }
+          }
+        }
+      }
+
+      // 3. Recherche globale (fallback)
+      if (!table2) {
+        const allDocTables = document.querySelectorAll("table");
+        for (let i = 0; i < allDocTables.length; i++) {
+          if (this.extractNatureDeTest(allDocTables[i])) {
+            table2 = allDocTables[i];
+            break;
+          }
+        }
       }
 
       // Créer la table de cross référence avec alignement
-      const crossRefTable = this.buildCrossRefTable(modele, natureDeTest, tablePrincipale);
+      const crossRefTable = this.buildCrossRefTable(modele, natureDeTest, tablePrincipale, table2);
       
       // Générer un ID unique
-      const crossRefId = this.generateCrossRefId(tablePrincipale);
+      const tableId = tablePrincipale.dataset.tableId || this.generateTableId(tablePrincipale);
+      tablePrincipale.dataset.tableId = tableId;
+      
+      const crossRefId = `crossref_${tableId}_${Date.now()}`;
       crossRefTable.dataset.crossRefId = crossRefId;
-      crossRefTable.dataset.forTable = tablePrincipale.dataset.tableId || this.generateTableId(tablePrincipale);
+      crossRefTable.dataset.forTable = tableId;
 
-      // Insérer EN DESSOUS de la table principale
-      if (tablePrincipale.nextSibling) {
-        tablePrincipale.parentNode.insertBefore(crossRefTable, tablePrincipale.nextSibling);
+      // Positionnement séparé (Modification 3)
+      const parentNode = tablePrincipale.parentNode;
+      
+      let elementToInsertAfter = tablePrincipale;
+      let newElement = crossRefTable;
+      
+      if (parentNode && parentNode !== globalDiv && parentNode.tagName === "DIV") {
+        elementToInsertAfter = parentNode;
+        
+        // Wrap crossRefTable in a similar wrapper div
+        const wrapper = document.createElement("div");
+        wrapper.className = parentNode.className;
+        if (parentNode.style.cssText) {
+          wrapper.style.cssText = parentNode.style.cssText;
+        }
+        wrapper.appendChild(crossRefTable);
+        newElement = wrapper;
+      }
+
+      // Insérer EN DESSOUS de la table principale / wrapper
+      if (elementToInsertAfter.nextSibling) {
+        elementToInsertAfter.parentNode.insertBefore(newElement, elementToInsertAfter.nextSibling);
       } else {
-        tablePrincipale.parentNode.appendChild(crossRefTable);
+        elementToInsertAfter.parentNode.appendChild(newElement);
       }
 
       // Rendre les cellules éditables
@@ -428,6 +680,7 @@
       this.setupCrossRefChangeDetection(crossRefTable);
 
       debug.log(`✅ Cross référence créée avec ID: ${crossRefId}`);
+      return crossRefTable;
     }
 
     /**
@@ -501,6 +754,15 @@
         };
       }
 
+      // Confirmations bancaires: 9 colonnes
+      // Modèle: (A) (B) (C) (D)=(A+B-C) (E) (F) (G) (H)=(E+F-G) (I)=(D)-(H)
+      if (nature.includes("confirmation") || nature.includes("bancaire")) {
+        return {
+          type: "Confirmations bancaires",
+          nbColonnes: 9,
+        };
+      }
+
       // Vierge: 0 colonnes
       if (nature.includes("vierge")) {
         return {
@@ -546,71 +808,122 @@
 
     /**
      * Construire la table HTML de cross référence horizontale
+     * Utilise measureRealColumns() pour un comptage fiable des colonnes réelles
      */
-    buildCrossRefTable(modele, natureDeTest, tablePrincipale) {
+    buildCrossRefTable(modele, natureDeTest, tablePrincipale, table2) {
+
+      // ================================================================
+      // ÉTAPE 1 : Mesurer les colonnes réelles depuis les lignes de données
+      // ================================================================
+      const colInfo = this.measureRealColumns(tablePrincipale);
+      const totalColumns = colInfo.count;
+      const columnWidthsPx = colInfo.widthsPx;
+      const tableWidthPx = colInfo.tableWidthPx;
+
+      debug.log(`📎 [Build] Colonnes réelles mesurées: ${totalColumns}, largeur table: ${tableWidthPx.toFixed(0)}px`);
+
+      // ================================================================
+      // ÉTAPE 2 : Créer la table avec la MÊME largeur que tablePrincipale
+      // ================================================================
       const table = document.createElement("table");
-      table.className = "min-w-full border border-gray-200 dark:border-gray-700 rounded-lg claraverse-cross-ref-horizontale";
-      table.style.cssText = `
-        margin-bottom: 1rem;
-        border-collapse: separate;
-        border-spacing: 0;
-        background: #f0f9ff;
-      `;
-
-      // Calculer l'alignement
-      const totalColumns = this.getTableHeaders(tablePrincipale).length;
-      const emptyColumnsCount = this.calculateEmptyColumnsCount(tablePrincipale, modele.nbColonnes);
+      // On retire min-w-full pour permettre à la table d'avoir sa largeur exacte en pixels
+      table.className = "border border-gray-200 dark:border-gray-700 rounded-lg claraverse-cross-ref-horizontale";
       
-      debug.log(`📎 [Build] Total colonnes: ${totalColumns}`);
-      debug.log(`📎 [Build] Colonnes vides avant: ${emptyColumnsCount}`);
+      // Forcer la même largeur exacte que la table principale
+      table.style.tableLayout = "fixed";
+      table.style.borderCollapse = "separate";
+      table.style.borderSpacing = "0";
+      table.style.background = "#f0f9ff";
+      table.style.marginBottom = "1rem";
+      if (tableWidthPx > 0) {
+        table.style.width = "max-content"; // Permet de respecter les largeurs des colonnes
+        table.style.minWidth = tableWidthPx + "px";
+      } else {
+        table.style.width = "100%";
+      }
 
-      // Créer le tbody
+      // ================================================================
+      // ÉTAPE 3 : Colgroup avec les largeurs exactes en px
+      // ================================================================
+      const colgroup = document.createElement("colgroup");
+      columnWidthsPx.forEach(wpx => {
+        const col = document.createElement("col");
+        col.style.width = wpx + "px";
+        colgroup.appendChild(col);
+      });
+      table.appendChild(colgroup);
+
+      // ================================================================
+      // ÉTAPE 4 : Calcul des positions (colonnes vides + références)
+      // ================================================================
+      const emptyColumnsCount = this.calculateEmptyColumnsCount(tablePrincipale, modele.nbColonnes, totalColumns);
+      const nbRefs = Math.min(modele.nbColonnes, Math.max(0, totalColumns - emptyColumnsCount));
+      const remainingColumns = Math.max(0, totalColumns - emptyColumnsCount - nbRefs);
+
+      debug.log(`📎 [Build] Total: ${totalColumns}, Vides avant: ${emptyColumnsCount}, Refs: ${nbRefs}, Vides après: ${remainingColumns}`);
+
+      // Préfixe des références
+      const prefix = this.extractReferencePrefix(table2);
+      debug.log(`📎 [Build] Pré-remplissage avec préfixe: ${prefix}`);
+
+      // ================================================================
+      // ÉTAPE 5 : Construction du tbody
+      // ================================================================
       const tbody = document.createElement("tbody");
-
-      // Ligne unique avec les colonnes
       const row = document.createElement("tr");
 
-      // Ajouter les colonnes vides AVANT les références (fusionnées)
-      if (emptyColumnsCount > 0) {
+      // Fonction utilitaire pour fixer la largeur stricte d'une cellule
+      const setExactWidth = (td, width) => {
+        if (width > 0) {
+          td.style.width = width + "px";
+          td.style.minWidth = width + "px";
+          td.style.maxWidth = width + "px";
+          td.style.boxSizing = "border-box";
+        }
+      };
+
+      // Cellules vides AVANT les références (non fusionnées pour forcer l'alignement strict)
+      for (let i = 0; i < emptyColumnsCount; i++) {
         const td = document.createElement("td");
         td.className = "px-4 py-3 border border-gray-200 dark:border-gray-700";
-        td.style.cssText = `
-          background: #f0f9ff;
-          min-width: 80px;
-        `;
-        td.colSpan = emptyColumnsCount;
+        td.style.background = "#f0f9ff";
+        setExactWidth(td, columnWidthsPx[i]);
+        if (i < emptyColumnsCount - 1) {
+           td.style.borderRight = "none";
+        }
+        if (i > 0) {
+           td.style.borderLeft = "none";
+        }
         td.textContent = "";
         row.appendChild(td);
       }
 
-      // Créer les cellules de référence selon le nombre de colonnes
-      for (let i = 0; i < modele.nbColonnes; i++) {
+      // Cellules de références
+      for (let i = 0; i < nbRefs; i++) {
         const td = document.createElement("td");
         td.className = "px-4 py-3 text-sm text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700";
-        td.style.cssText = `
-          background: #e0f2fe;
-          font-weight: 500;
-          text-align: center;
-          min-width: 80px;
-        `;
-        // Placeholder pour la cross référence
-        td.textContent = `[  ]`;
+        td.style.background = "#e0f2fe";
+        td.style.fontWeight = "500";
+        td.style.textAlign = "center";
+        setExactWidth(td, columnWidthsPx[emptyColumnsCount + i]);
+        // Remplissage avec des crochets vides selon la demande
+        td.textContent = `[]`;
         td.contentEditable = "true";
         row.appendChild(td);
       }
 
-      // Compléter avec des colonnes vides APRÈS les références si nécessaire (fusionnées)
-      const remainingColumns = totalColumns - emptyColumnsCount - modele.nbColonnes;
-      debug.log(`📎 [Build] Colonnes vides après: ${remainingColumns}`);
-      
-      if (remainingColumns > 0) {
+      // Cellules vides APRÈS les références (non fusionnées pour forcer l'alignement strict)
+      for (let i = 0; i < remainingColumns; i++) {
         const td = document.createElement("td");
         td.className = "px-4 py-3 border border-gray-200 dark:border-gray-700";
-        td.style.cssText = `
-          background: #f0f9ff;
-          min-width: 80px;
-        `;
-        td.colSpan = remainingColumns;
+        td.style.background = "#f0f9ff";
+        setExactWidth(td, columnWidthsPx[emptyColumnsCount + nbRefs + i]);
+        if (i < remainingColumns - 1) {
+           td.style.borderRight = "none";
+        }
+        if (i > 0) {
+           td.style.borderLeft = "none";
+        }
         td.textContent = "";
         row.appendChild(td);
       }
@@ -619,6 +932,89 @@
       table.appendChild(tbody);
 
       return table;
+    }
+
+    /**
+     * @deprecated Utilisez measureRealColumns() à la place.
+     * Conservé pour compatibilité ascendante uniquement.
+     */
+    getColumnWidthsPct(tablePrincipale) {
+      const info = this.measureRealColumns(tablePrincipale);
+      const sum = info.tableWidthPx > 0 ? info.tableWidthPx : 1;
+      return info.widthsPx.map(w => (w / sum) * 100);
+    }
+
+    /**
+     * Extract the reference from a table containing a "Reference" field
+     */
+    extractReference(table) {
+      const rows = table.querySelectorAll("tr");
+      
+      // Horizontal check
+      for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+        const row = rows[rowIdx];
+        const cells = row.querySelectorAll("td, th");
+        
+        for (let i = 0; i < cells.length - 1; i++) {
+          const cellText = cells[i].textContent.trim().toLowerCase();
+          
+          if (cellText === "reference" || cellText === "référence") {
+            const valueCell = cells[i + 1];
+            if (valueCell && valueCell.textContent.trim() !== "") {
+              return valueCell.textContent.trim();
+            }
+          }
+        }
+      }
+      
+      // Vertical check
+      for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+        const row = rows[rowIdx];
+        const cells = row.querySelectorAll("td, th");
+        
+        for (let colIdx = 0; colIdx < cells.length; colIdx++) {
+          const cellText = cells[colIdx].textContent.trim().toLowerCase();
+          
+          if (cellText === "reference" || cellText === "référence") {
+            for (let nextRowIdx = rowIdx + 1; nextRowIdx < rows.length; nextRowIdx++) {
+              const nextRow = rows[nextRowIdx];
+              const nextCells = nextRow.querySelectorAll("td, th");
+              
+              if (nextCells[colIdx]) {
+                const value = nextCells[colIdx].textContent.trim();
+                if (value !== "" && !value.toLowerCase().includes("ref")) {
+                  return value;
+                }
+              }
+            }
+            if (colIdx + 1 < cells.length) {
+              const adjacentCell = cells[colIdx + 1];
+              if (adjacentCell && adjacentCell.textContent.trim() !== "") {
+                return adjacentCell.textContent.trim();
+              }
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    /**
+     * Extract prefix from reference (e.g. Test-Caisse-001 -> TE, AA-01 -> AA)
+     */
+    extractReferencePrefix(table2) {
+      if (!table2) return "AA";
+      const ref = this.extractReference(table2);
+      if (!ref) return "AA";
+      
+      // Keep only letters
+      const letters = ref.replace(/[^a-zA-Z]/g, '');
+      if (letters.length >= 2) {
+        return letters.substring(0, 2).toUpperCase();
+      } else if (letters.length === 1) {
+        return letters.toUpperCase();
+      }
+      return "AA";
     }
 
     /**

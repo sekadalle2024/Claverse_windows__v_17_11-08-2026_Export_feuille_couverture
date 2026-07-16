@@ -56,7 +56,10 @@
             { text: "Supprimer ligne", action: () => this.deleteSelectedRow() },
             { text: "Effacer contenu toutes lignes", action: () => this.clearAllRowsContent() },
             { text: "📋 Coller depuis Excel", action: () => this.pasteFromExcel(), shortcut: "Ctrl+V" },
-            { text: "📄 Copier Table (remplacer)", action: () => this.replaceTableFromExcel(), shortcut: "Ctrl+Shift+V" }
+            { text: "📄 Copier Table (remplacer)", action: () => this.replaceTableFromExcel(), shortcut: "Ctrl+Shift+V" },
+            { text: "─────────────────────", action: null },
+            { text: "❄️ Figer lignes (À venir)", action: null },
+            { text: "❄️ Annuler figer lignes (À venir)", action: null }
           ]
         },
         {
@@ -67,7 +70,10 @@
             { text: "Vider cellules colonne", action: () => this.clearColumnContent() },
             { text: "Ajouter colonne CTR", action: () => this.addCTRColumns() },
             { text: "📋 Ajouter colonnes de pointage", action: () => this.addPointageColumns() },
-            { text: "Supprimer colonne", action: () => this.deleteSelectedColumn() }
+            { text: "Supprimer colonne", action: () => this.deleteSelectedColumn() },
+            { text: "─────────────────────", action: null },
+            { text: "❄️ Figer colonne", action: () => this.freezeColumns() },
+            { text: "❄️ Annuler Figer colonne", action: () => this.unfreezeColumns() }
           ]
         },
         {
@@ -77,7 +83,8 @@
             { text: "Mouvement (D=A+B-C, Écart=D-E)", action: () => this.executeMouvement(), shortcut: "Ctrl+2" },
             { text: "Rapprochement (C=A-B, Écart=C)", action: () => this.executeRapprochement(), shortcut: "Ctrl+3" },
             { text: "Séparation (dates: C=A-B)", action: () => this.executeSeparation(), shortcut: "Ctrl+4" },
-            { text: "Estimation (C=A*B, Écart=C-D)", action: () => this.executeEstimation(), shortcut: "Ctrl+5" }
+            { text: "Estimation (C=A*B, Écart=C-D)", action: () => this.executeEstimation(), shortcut: "Ctrl+5" },
+            { text: "Confirmation bancaire (Ecart=D-K)", action: () => this.executeConfirmationBancaire(), shortcut: "Ctrl+6" }
           ]
         },
         {
@@ -103,7 +110,10 @@
             { text: "Insérer table en dessous", action: () => this.insertTableBelow() },
             { text: "📋 Copier table", action: () => this.copyTableToMemory(), shortcut: "Ctrl+C" },
             { text: "📄 Coller table", action: () => this.pasteTableFromMemory(), shortcut: "Ctrl+Shift+P" },
-            { text: "Supprimer la table", action: () => this.deleteTable() }
+            { text: "Supprimer la table", action: () => this.deleteTable() },
+            { text: "─────────────────────", action: null },
+            { text: "❄️ Figer lignes et colonnes (À venir)", action: null },
+            { text: "❄️ Annuler figer lignes et colonnes (À venir)", action: null }
           ]
         },
         {
@@ -384,6 +394,11 @@
         if (table && this.isTableInChat(table)) {
           e.preventDefault();
           this.clearHoverTimeout();
+          
+          const cell = e.target.closest("td, th");
+          if (cell) this.handleCellClick(e, cell, table);
+          else this.targetTable = table;
+
           this.showMenu(e.pageX, e.pageY, table);
         }
       });
@@ -412,6 +427,7 @@
         if (e.ctrlKey && e.key === "3" && this.targetTable) { e.preventDefault(); this.executeRapprochement(); }
         if (e.ctrlKey && e.key === "4" && this.targetTable) { e.preventDefault(); this.executeSeparation(); }
         if (e.ctrlKey && e.key === "5" && this.targetTable) { e.preventDefault(); this.executeEstimation(); }
+        if (e.ctrlKey && e.key === "6" && this.targetTable) { e.preventDefault(); this.executeConfirmationBancaire(); }
         if (e.ctrlKey && e.key === "r" && this.targetTable) { e.preventDefault(); this.executeRiskEvaluation(); }
         // Raccourci Ctrl+Shift+V pour remplacer la table depuis Excel
         if (e.ctrlKey && e.shiftKey && e.key === "V" && this.targetTable) { e.preventDefault(); this.replaceTableFromExcel(); }
@@ -895,6 +911,87 @@
       this.showQuickNotification("✅ Colonne dupliquée");
       this.notifyTableStructureChange("column_duplicated", { columnIndex: colIdx });
       this.syncWithDev();
+    }
+
+    // === ACTIONS FIGER PANES ===
+    freezeColumns() {
+      if (!this.validateActiveCell()) return;
+      const numColsToFreeze = this.activeCellPosition.col + 1;
+      this.applyFreezePanes(this.targetTable, 0, numColsToFreeze);
+      this.showQuickNotification(`❄️ ${numColsToFreeze} colonne(s) figée(s)`);
+    }
+
+    unfreezeColumns() {
+      if (!this.targetTable) return;
+      this.applyFreezePanes(this.targetTable, 0, 0);
+      this.showQuickNotification("❄️ Colonnes libérées");
+    }
+
+    applyFreezePanes(table, freezeRows, freezeCols) {
+      table.style.borderCollapse = 'separate';
+      table.style.borderSpacing = '0';
+      table.style.minWidth = 'max-content';
+      
+      const container = table.parentElement;
+      if (container) {
+          container.style.overflowX = 'auto';
+          container.style.maxWidth = '100%';
+          if (window.getComputedStyle(container).display === 'inline') {
+              container.style.display = 'block';
+          }
+      }
+
+      const rows = Array.from(table.querySelectorAll('tr'));
+      
+      let accumulatedHeights = [];
+      let currentTop = 0;
+      rows.forEach(r => {
+          accumulatedHeights.push(currentTop);
+          currentTop += r.getBoundingClientRect().height;
+      });
+
+      const isDark = document.documentElement.classList.contains('dark') || document.body.classList.contains('dark');
+      const defaultBg = isDark ? '#1e293b' : '#ffffff';
+
+      rows.forEach((row, rowIndex) => {
+          const cells = Array.from(row.querySelectorAll('th, td'));
+          let currentLeft = 0;
+
+          cells.forEach((cell, colIndex) => {
+              const isRowFrozen = rowIndex < freezeRows;
+              const isColFrozen = colIndex < freezeCols;
+
+              if (isRowFrozen || isColFrozen) {
+                  cell.style.position = 'sticky';
+                  
+                  const computedBg = window.getComputedStyle(cell).backgroundColor;
+                  if (computedBg === 'rgba(0, 0, 0, 0)' || computedBg === 'transparent') {
+                      cell.style.backgroundColor = defaultBg;
+                  }
+
+                  if (isRowFrozen && isColFrozen) {
+                      cell.style.top = `${accumulatedHeights[rowIndex]}px`;
+                      cell.style.left = `${currentLeft}px`;
+                      cell.style.zIndex = '30';
+                  } else if (isRowFrozen) {
+                      cell.style.top = `${accumulatedHeights[rowIndex]}px`;
+                      cell.style.left = 'auto';
+                      cell.style.zIndex = '20';
+                  } else if (isColFrozen) {
+                      cell.style.top = 'auto';
+                      cell.style.left = `${currentLeft}px`;
+                      cell.style.zIndex = '10';
+                  }
+              } else {
+                  cell.style.position = '';
+                  cell.style.top = '';
+                  cell.style.left = '';
+                  cell.style.zIndex = '';
+              }
+
+              currentLeft += cell.getBoundingClientRect().width;
+          });
+      });
     }
 
     clearColumnContent() {
@@ -3042,8 +3139,8 @@
 
     /**
      * RAPPROCHEMENT: C = A - B, Écart = C
-     * S'applique aux 3 dernières colonnes avant Écart
-     * A, B, C sont des valeurs monétaires
+     * S'applique aux 2 dernières colonnes avant Écart
+     * A, B sont des valeurs monétaires
      */
     executeRapprochement() {
       if (!this.targetTable) { this.showAlert("⚠️ Aucune table sélectionnée."); return; }
@@ -3052,13 +3149,12 @@
       const ecartIdx = this.findEcartColumnIndex(headers);
 
       if (ecartIdx === -1) { this.showAlert("⚠️ Colonne 'Ecart' non trouvée."); return; }
-      if (ecartIdx < 3) { this.showAlert("⚠️ Il faut au moins 3 colonnes avant 'Ecart' pour Rapprochement."); return; }
+      if (ecartIdx < 2) { this.showAlert("⚠️ Il faut au moins 2 colonnes avant 'Ecart' pour Rapprochement."); return; }
 
-      // A = ecart-3, B = ecart-2, C = ecart-1 (calculé)
-      // C = A - B, Écart = C
-      const colA = ecartIdx - 3;
-      const colB = ecartIdx - 2;
-      const colC = ecartIdx - 1; // Sera mis à jour
+      // A = ecart-2, B = ecart-1
+      // Écart = A - B
+      const colA = ecartIdx - 2;
+      const colB = ecartIdx - 1;
 
       const rows = this.getDataRows();
       let calculCount = 0;
@@ -3072,10 +3168,6 @@
 
         if (!isNaN(valA) && !isNaN(valB)) {
           const C = valA - valB;
-
-          // Mettre à jour C
-          cells[colC].textContent = this.formatMonetary(C);
-          cells[colC].style.fontWeight = 'bold';
 
           // Écart = C
           cells[ecartIdx].textContent = this.formatMonetary(C);
@@ -3092,8 +3184,8 @@
 
     /**
      * SÉPARATION: C = A - B (dates), Écart = C (en jours)
-     * S'applique aux 3 dernières colonnes avant Écart
-     * A, B sont des dates (années ou dates complètes), C est l'écart en jours
+     * S'applique aux 2 dernières colonnes avant Écart
+     * A, B sont des dates (années ou dates complètes)
      */
     executeSeparation() {
       if (!this.targetTable) { this.showAlert("⚠️ Aucune table sélectionnée."); return; }
@@ -3102,13 +3194,12 @@
       const ecartIdx = this.findEcartColumnIndex(headers);
 
       if (ecartIdx === -1) { this.showAlert("⚠️ Colonne 'Ecart' non trouvée."); return; }
-      if (ecartIdx < 3) { this.showAlert("⚠️ Il faut au moins 3 colonnes avant 'Ecart' pour Séparation."); return; }
+      if (ecartIdx < 2) { this.showAlert("⚠️ Il faut au moins 2 colonnes avant 'Ecart' pour Séparation."); return; }
 
-      // A = ecart-3 (date), B = ecart-2 (date), C = ecart-1 (calculé en jours)
-      // C = A - B (différence en jours), Écart = C
-      const colA = ecartIdx - 3;
-      const colB = ecartIdx - 2;
-      const colC = ecartIdx - 1;
+      // A = ecart-2 (date), B = ecart-1 (date)
+      // Écart = A - B (différence en jours)
+      const colA = ecartIdx - 2;
+      const colB = ecartIdx - 1;
 
       const rows = this.getDataRows();
       let calculCount = 0;
@@ -3124,10 +3215,6 @@
           const diffDays = this.dateDiffInDays(dateA, dateB);
 
           if (!isNaN(diffDays)) {
-            // Mettre à jour C avec la différence en jours
-            cells[colC].textContent = `${diffDays} jours`;
-            cells[colC].style.fontWeight = 'bold';
-
             // Écart = C (nombre de jours)
             cells[ecartIdx].textContent = `${diffDays}`;
             cells[ecartIdx].style.color = diffDays >= 0 ? 'green' : 'red';
@@ -3201,6 +3288,74 @@
 
       this.showQuickNotification(`✅ Estimation: ${calculCount} ligne(s) calculée(s) (C=A×B, Écart=C-D)`);
       this.notifyTableStructureChange("arithmetic_estimation", { calculCount });
+      this.syncWithDev();
+    }
+
+    /**
+     * CONFIRMATION BANCAIRE: D = A + B - C, K = H + I - J, Écart = D - K
+     * S'applique aux 8 dernières colonnes avant Écart
+     * A, B, C, D, H, I, J, K sont des valeurs monétaires
+     */
+    executeConfirmationBancaire() {
+      if (!this.targetTable) { this.showAlert("⚠️ Aucune table sélectionnée."); return; }
+
+      const headers = this.getTableHeaders();
+      const ecartIdx = this.findEcartColumnIndex(headers);
+
+      if (ecartIdx === -1) { this.showAlert("⚠️ Colonne 'Ecart' non trouvée."); return; }
+      if (ecartIdx < 8) { this.showAlert("⚠️ Il faut au moins 8 colonnes avant 'Ecart' pour Confirmation bancaire."); return; }
+
+      // A = ecart-8, B = ecart-7, C = ecart-6, D = ecart-5 (mis à jour)
+      // H = ecart-4, I = ecart-3, J = ecart-2, K = ecart-1 (mis à jour)
+      const colA = ecartIdx - 8;
+      const colB = ecartIdx - 7;
+      const colC = ecartIdx - 6;
+      const colD = ecartIdx - 5;
+      const colH = ecartIdx - 4;
+      const colI = ecartIdx - 3;
+      const colJ = ecartIdx - 2;
+      const colK = ecartIdx - 1;
+
+      const rows = this.getDataRows();
+      let calculCount = 0;
+
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length <= ecartIdx) return;
+
+        const valA = this.parseMonetaryValue(cells[colA]?.textContent);
+        const valB = this.parseMonetaryValue(cells[colB]?.textContent);
+        const valC = this.parseMonetaryValue(cells[colC]?.textContent);
+        
+        const valH = this.parseMonetaryValue(cells[colH]?.textContent);
+        const valI = this.parseMonetaryValue(cells[colI]?.textContent);
+        const valJ = this.parseMonetaryValue(cells[colJ]?.textContent);
+
+        if (!isNaN(valA) && !isNaN(valB) && !isNaN(valC) && 
+            !isNaN(valH) && !isNaN(valI) && !isNaN(valJ)) {
+          
+          const D = valA + valB - valC;
+          const K = valH + valI - valJ;
+          const ecart = D - K;
+
+          // Mettre à jour D
+          cells[colD].textContent = this.formatMonetary(D);
+          cells[colD].style.fontWeight = 'bold';
+
+          // Mettre à jour K
+          cells[colK].textContent = this.formatMonetary(K);
+          cells[colK].style.fontWeight = 'bold';
+
+          // Mettre à jour Écart
+          cells[ecartIdx].textContent = this.formatMonetary(ecart);
+          cells[ecartIdx].style.color = ecart >= 0 ? 'green' : 'red';
+          cells[ecartIdx].style.fontWeight = 'bold';
+          calculCount++;
+        }
+      });
+
+      this.showQuickNotification(`✅ Confirmation bancaire: ${calculCount} ligne(s) calculée(s) (D=A+B-C, K=H+I-J, Écart=D-K)`);
+      this.notifyTableStructureChange("arithmetic_confirmation_bancaire", { calculCount });
       this.syncWithDev();
     }
 
@@ -10692,27 +10847,40 @@
 
         console.log("📐 [Schéma Calcul] ✅ Conteneur parent trouvé");
 
-        // Rechercher toutes les tables dans la div
-        const tables = parentDiv.querySelectorAll("table");
-        console.log(`📐 [Schéma Calcul] Nombre de tables trouvées: ${tables.length}`);
-
-        if (tables.length < 2) {
-          this.showAlert("⚠️ Pas assez de tables dans cette section.\n\nLe schéma de calcul nécessite au moins 2 tables:\n- Une table avec 'Nature de test'\n- Une table principale avec Conclusion/Assertion/CTR/Ecart");
-          return;
-        }
-
-        // Rechercher la table avec "Nature de test"
+        // ── Recherche élargie de la table "Nature de test" ──
         let table2 = null;
         let natureDeTest = null;
+        const allRelevantTables = [];
 
-        console.log("📐 [Schéma Calcul] Recherche de la table avec 'Nature de test'...");
-        for (let i = 0; i < tables.length; i++) {
-          const table = tables[i];
+        // 1. Collecter les tables locales (div.prose)
+        const localTables = parentDiv.querySelectorAll("table");
+        localTables.forEach(t => allRelevantTables.push(t));
+
+        // 2. Si pas trouvé, collecter depuis le conteneur du chat
+        const chatContainer = this.targetTable.closest('.overflow-y-auto, [class*="overflow-y-auto"]')
+                           || this.targetTable.closest('.flex-1')
+                           || this.targetTable.closest('[class*="chat"]');
+        if (chatContainer) {
+          const chatTables = chatContainer.querySelectorAll("table");
+          chatTables.forEach(t => {
+            if (!allRelevantTables.includes(t)) allRelevantTables.push(t);
+          });
+        }
+
+        // 3. Fallback: document entier
+        const docTables = document.querySelectorAll("table");
+        docTables.forEach(t => {
+          if (!allRelevantTables.includes(t)) allRelevantTables.push(t);
+        });
+
+        console.log("📐 [Schéma Calcul] Recherche de la table avec 'Nature de test' parmi " + allRelevantTables.length + " tables...");
+        for (let i = 0; i < allRelevantTables.length; i++) {
+          const table = allRelevantTables[i];
           const result = this.extractNatureDeTestDirect(table);
-          console.log(`  Table ${i + 1}: ${result ? `✅ Nature trouvée: "${result}"` : "❌ Pas de nature"}`);
           if (result) {
             table2 = table;
             natureDeTest = result;
+            console.log(`  Table ${i + 1}: ✅ Nature trouvée: "${result}"`);
             break;
           }
         }
@@ -10728,8 +10896,8 @@
         let tablePrincipale = null;
 
         console.log("📐 [Schéma Calcul] Recherche de la table principale...");
-        for (let i = 0; i < tables.length; i++) {
-          const table = tables[i];
+        for (let i = 0; i < allRelevantTables.length; i++) {
+          const table = allRelevantTables[i];
           if (table === table2) {
             console.log(`  Table ${i + 1}: ⏭️ Ignorée (c'est la table 2)`);
             continue;
@@ -10910,7 +11078,7 @@
      * @param {HTMLTableElement} table - La table à analyser
      * @returns {number} L'index de la colonne Ecart, ou -1 si non trouvée
      */
-    findEcartColumnIndex(table) {
+    findEcartColumnIndexDirect(table) {
       const headers = this.getTableHeadersDirect(table);
 
       console.log(`📐 [Ecart] Recherche de la colonne Ecart dans ${headers.length} colonnes`);
@@ -10936,7 +11104,7 @@
      */
     calculateEmptyColumnsCount(tablePrincipale, modele) {
       const totalColumns = this.getTableHeadersDirect(tablePrincipale).length;
-      const ecartIndex = this.findEcartColumnIndex(tablePrincipale);
+      const ecartIndex = this.findEcartColumnIndexDirect(tablePrincipale);
 
       console.log(`📐 [Alignement] Total colonnes table: ${totalColumns}`);
       console.log(`📐 [Alignement] Index colonne Ecart: ${ecartIndex}`);
@@ -11327,277 +11495,101 @@
       }
 
       try {
+        if (!window.CrossRefHorizontaleManager) {
+          this.showAlert("❌ Module de cross référence non chargé.");
+          return;
+        }
+
         // Vérifier que c'est une table modelisée
-        if (!this.isModelizedTable(this.targetTable)) {
+        if (!window.CrossRefHorizontaleManager.isModelizedTable(this.targetTable)) {
           this.showAlert("⚠️ Cette table n'est pas une table modelisée.\n\nLa cross référence horizontale nécessite une table avec:\n- Conclusion\n- Assertion\n- CTR\n- Ecart");
           return;
         }
 
-        // Trouver la div parente
-        const parentDiv = this.targetTable.closest('div.prose, div[class*="prose"]');
-        if (!parentDiv) {
-          this.showAlert("⚠️ Impossible de trouver la section parente.");
-          return;
-        }
-
-        // Trouver toutes les tables dans la div
-        const tables = parentDiv.querySelectorAll("table");
-
-        if (tables.length < 2) {
-          this.showAlert("⚠️ Pas assez de tables dans cette section.\n\nLa cross référence nécessite au moins 2 tables:\n- Une table avec 'Nature de test'\n- Une table principale");
-          return;
-        }
-
-        // Trouver la table 2 avec "Nature de test"
-        let table2 = null;
+        // ── Recherche élargie de la table "Nature de test" ──
+        // Chaque message du chat a sa propre div.prose, donc la table
+        // Rubrique/Description (Nature de test) peut être dans un message
+        // différent de la table principale. On cherche progressivement :
+        //   1. Dans la div.prose locale
+        //   2. Dans le conteneur scrollable du chat (overflow-y-auto)
+        //   3. En dernier recours, dans tout le document
         let natureDeTest = null;
 
-        for (let i = 0; i < tables.length; i++) {
-          const table = tables[i];
-          const result = this.extractNatureDeTest(table);
-          if (result) {
-            table2 = table;
-            natureDeTest = result;
-            break;
+        // Niveau 1 : div.prose locale
+        const parentDiv = this.targetTable.closest('div.prose, div[class*="prose"]');
+        if (parentDiv) {
+          const localTables = parentDiv.querySelectorAll("table");
+          console.log(`📎 [Cross Ref] Niveau 1 – tables dans div.prose locale: ${localTables.length}`);
+          for (let i = 0; i < localTables.length; i++) {
+            const result = window.CrossRefHorizontaleManager.extractNatureDeTest(localTables[i]);
+            if (result) {
+              natureDeTest = result;
+              console.log(`📎 [Cross Ref] ✅ Nature trouvée en local: "${result}"`);
+              break;
+            }
           }
         }
 
-        if (!table2 || !natureDeTest) {
+        // Niveau 2 : conteneur scrollable du chat (messages voisins)
+        if (!natureDeTest) {
+          const chatContainer = this.targetTable.closest('.overflow-y-auto, [class*="overflow-y-auto"]')
+                             || this.targetTable.closest('.flex-1')
+                             || this.targetTable.closest('[class*="chat"]');
+          if (chatContainer) {
+            const allTables = chatContainer.querySelectorAll("table");
+            console.log(`📎 [Cross Ref] Niveau 2 – tables dans le conteneur chat: ${allTables.length}`);
+            for (let i = 0; i < allTables.length; i++) {
+              const result = window.CrossRefHorizontaleManager.extractNatureDeTest(allTables[i]);
+              if (result) {
+                natureDeTest = result;
+                console.log(`📎 [Cross Ref] ✅ Nature trouvée dans le chat: "${result}"`);
+                break;
+              }
+            }
+          }
+        }
+
+        // Niveau 3 : document entier (fallback ultime)
+        if (!natureDeTest) {
+          const allDocTables = document.querySelectorAll("table");
+          console.log(`📎 [Cross Ref] Niveau 3 – tables dans le document: ${allDocTables.length}`);
+          for (let i = 0; i < allDocTables.length; i++) {
+            const result = window.CrossRefHorizontaleManager.extractNatureDeTest(allDocTables[i]);
+            if (result) {
+              natureDeTest = result;
+              console.log(`📎 [Cross Ref] ✅ Nature trouvée dans le document: "${result}"`);
+              break;
+            }
+          }
+        }
+
+        if (!natureDeTest) {
           this.showAlert("⚠️ Aucune table avec 'Nature de test' trouvée.\n\nLa cross référence nécessite une table contenant:\n- Une colonne 'Nature de test'\n- Une valeur (Validation, Mouvement, Rapprochement, etc.)");
           return;
         }
 
-        // Vérifier si une cross référence existe déjà
-        const existingCrossRef = this.findExistingCrossRefDirect(this.targetTable);
-
-        if (existingCrossRef) {
-          const response = confirm("Une cross référence existe déjà pour cette table.\n\nVoulez-vous la remplacer ?");
-          if (response) {
-            existingCrossRef.remove();
+        const crossRefTable = window.CrossRefHorizontaleManager.createCrossRefForTable(this.targetTable, natureDeTest);
+        if (crossRefTable) {
+          this.showQuickNotification(`✅ Cross référence ajoutée: ${natureDeTest}`);
+          console.log("✅ [Cross Ref] Cross référence créée avec succès!");
+        } else {
+          if (window.CrossRefHorizontaleManager.findExistingCrossRef(this.targetTable)) {
+            const response = confirm("Une cross référence existe déjà pour cette table.\n\nVoulez-vous la remplacer ?");
+            if (response) {
+              window.CrossRefHorizontaleManager.deleteCrossRefForTable(this.targetTable);
+              const newCrossRefTable = window.CrossRefHorizontaleManager.createCrossRefForTable(this.targetTable, natureDeTest);
+              if (newCrossRefTable) {
+                this.showQuickNotification(`✅ Cross référence remplacée: ${natureDeTest}`);
+              }
+            }
           } else {
-            return;
+            this.showAlert(`⚠️ Impossible de créer la cross référence (Modèle non reconnu: ${natureDeTest}).`);
           }
         }
-
-        // Créer la cross référence
-        this.createCrossRefTableDirect(this.targetTable, natureDeTest);
-
-        this.showQuickNotification(`✅ Cross référence ajoutée: ${natureDeTest}`);
-        console.log("✅ [Cross Ref] Cross référence créée avec succès!");
-
       } catch (error) {
         console.error("❌ [Cross Ref] Erreur:", error);
         this.showAlert(`❌ Erreur lors de l'ajout:\n\n${error.message}`);
       }
-    }
-
-    /**
-     * Trouver une cross référence existante
-     */
-    findExistingCrossRefDirect(table) {
-      const tableId = table.dataset.tableId || this.generateTableIdForCrossRef(table);
-      return document.querySelector(`table.claraverse-cross-ref-horizontale[data-for-table="${tableId}"]`);
-    }
-
-    /**
-     * Créer la table de cross référence
-     */
-    createCrossRefTableDirect(tablePrincipale, natureDeTest) {
-      console.log(`📎 [Cross Ref] Création pour: ${natureDeTest}`);
-
-      // Déterminer le modèle
-      const modele = this.determinerModeleCrossRef(natureDeTest);
-
-      if (!modele) {
-        throw new Error(`Aucun modèle trouvé pour: ${natureDeTest}`);
-      }
-
-      console.log(`📎 [Cross Ref] Modèle: ${modele.type}, ${modele.nbColonnes} colonne(s)`);
-
-      // Calculer l'alignement (même logique que pour le schéma de calcul)
-      const totalColumns = this.getTableHeadersDirect(tablePrincipale).length;
-
-      // Créer un modèle temporaire avec les colonnes pour utiliser calculateEmptyColumnsCount
-      const tempModele = {
-        colonnes: Array(modele.nbColonnes).fill("[  ]")
-      };
-      const emptyColumnsCount = this.calculateEmptyColumnsCount(tablePrincipale, tempModele);
-
-      console.log(`📎 [Cross Ref] Table principale: ${totalColumns} colonnes`);
-      console.log(`📎 [Cross Ref] Colonnes vides avant références: ${emptyColumnsCount}`);
-
-      // Créer la table
-      const crossRefTable = document.createElement("table");
-      crossRefTable.className = "min-w-full border border-gray-200 dark:border-gray-700 rounded-lg claraverse-cross-ref-horizontale";
-      crossRefTable.style.cssText = `
-        margin-bottom: 1rem;
-        border-collapse: separate;
-        border-spacing: 0;
-        background: #f0f9ff;
-      `;
-
-      // Générer un ID unique
-      const tableId = tablePrincipale.dataset.tableId || this.generateTableIdForCrossRef(tablePrincipale);
-      tablePrincipale.dataset.tableId = tableId;
-
-      const crossRefId = `crossref_${tableId}_${Date.now()}`;
-      crossRefTable.dataset.crossRefId = crossRefId;
-      crossRefTable.dataset.forTable = tableId;
-
-      // Créer le tbody
-      const tbody = document.createElement("tbody");
-      const row = document.createElement("tr");
-
-      // Ajouter les colonnes vides AVANT les références (fusionnées)
-      if (emptyColumnsCount > 0) {
-        const td = document.createElement("td");
-        td.className = "px-4 py-3 border border-gray-200 dark:border-gray-700";
-        td.style.cssText = `
-          background: #f0f9ff;
-          min-width: 80px;
-        `;
-        td.colSpan = emptyColumnsCount;
-        td.textContent = "";
-        row.appendChild(td);
-      }
-
-      // Ajouter les cellules de référence
-      for (let i = 0; i < modele.nbColonnes; i++) {
-        const td = document.createElement("td");
-        td.className = "px-4 py-3 text-sm text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700";
-        td.style.cssText = `
-          background: #e0f2fe;
-          font-weight: 500;
-          text-align: center;
-          min-width: 80px;
-          cursor: text;
-        `;
-        td.textContent = `[  ]`;
-        td.contentEditable = "true";
-
-        // Événements pour l'édition
-        td.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            td.blur();
-          }
-        });
-
-        row.appendChild(td);
-      }
-
-      // Compléter avec des colonnes vides APRÈS les références si nécessaire (fusionnées)
-      const remainingColumns = totalColumns - emptyColumnsCount - modele.nbColonnes;
-      console.log(`📎 [Cross Ref] Colonnes vides après références: ${remainingColumns}`);
-
-      if (remainingColumns > 0) {
-        const td = document.createElement("td");
-        td.className = "px-4 py-3 border border-gray-200 dark:border-gray-700";
-        td.style.cssText = `
-          background: #f0f9ff;
-          min-width: 80px;
-        `;
-        td.colSpan = remainingColumns;
-        td.textContent = "";
-        row.appendChild(td);
-      }
-
-      tbody.appendChild(row);
-      crossRefTable.appendChild(tbody);
-
-      // Insérer EN DESSOUS de la table principale
-      if (tablePrincipale.nextSibling) {
-        tablePrincipale.parentNode.insertBefore(crossRefTable, tablePrincipale.nextSibling);
-      } else {
-        tablePrincipale.parentNode.appendChild(crossRefTable);
-      }
-
-      console.log(`📎 [Cross Ref] ✅ Table créée avec ID: ${crossRefId}`);
-      console.log(`📎 [Cross Ref] ✅ Alignement: ${emptyColumnsCount} vides + ${modele.nbColonnes} références + ${remainingColumns} vides = ${totalColumns} colonnes`);
-    }
-
-    /**
-     * Déterminer le modèle de cross référence
-     */
-    determinerModeleCrossRef(natureDeTest) {
-      const nature = natureDeTest.toLowerCase();
-
-      if (nature.includes("validation")) {
-        return { type: "Validation", nbColonnes: 5 };
-      }
-
-      if (nature.includes("mouvement")) {
-        return { type: "Mouvement", nbColonnes: 6 };
-      }
-
-      if (nature.includes("rapprochement")) {
-        return { type: "Rapprochement", nbColonnes: 3 };
-      }
-
-      if (nature.includes("separation") || nature.includes("séparation")) {
-        return { type: "Séparation", nbColonnes: 3 };
-      }
-
-      if (nature.includes("estimation")) {
-        return { type: "Estimation", nbColonnes: 5 };
-      }
-
-      if (nature.includes("revue") && nature.includes("analytique")) {
-        return { type: "Revue analytique", nbColonnes: 3 };
-      }
-
-      if (nature.includes("cadrage") && nature.includes("tva")) {
-        return { type: "Cadrage TVA", nbColonnes: 6 };
-      }
-
-      if (nature.includes("cotisation") && nature.includes("sociale")) {
-        return { type: "Cotisations sociales", nbColonnes: 4 };
-      }
-
-      if (nature.includes("vierge")) {
-        return { type: "Vierge", nbColonnes: 0 };
-      }
-
-      if (nature.includes("modelisation") || nature.includes("modélisation")) {
-        const variables = this.extractVariablesFromNatureCrossRef(natureDeTest);
-        return { type: "Modélisation", nbColonnes: variables.length };
-      }
-
-      if (natureDeTest.trim() !== "") {
-        const variables = this.extractVariablesFromNatureCrossRef(natureDeTest);
-        if (variables.length > 0) {
-          return { type: "Modélisation (auto-détecté)", nbColonnes: variables.length };
-        }
-      }
-
-      return null;
-    }
-
-    /**
-     * Extraire les variables d'une formule
-     */
-    extractVariablesFromNatureCrossRef(natureDeTest) {
-      const variablePattern = /\([A-Z]\)/g;
-      const matches = natureDeTest.match(variablePattern);
-
-      if (!matches) return [];
-
-      return [...new Set(matches)];
-    }
-
-    /**
-     * Générer un ID pour une table (cross ref)
-     */
-    generateTableIdForCrossRef(table) {
-      const headers = this.getTableHeaders(table);
-      const headerText = headers.join("__").replace(/\s+/g, "_");
-      let hash = 0;
-      for (let i = 0; i < headerText.length; i++) {
-        const char = headerText.charCodeAt(i);
-        hash = (hash << 5) - hash + char;
-        hash = hash & hash;
-      }
-      return `table_${Math.abs(hash).toString(36)}`;
     }
 
     /**
@@ -11612,17 +11604,19 @@
       }
 
       try {
-        const existingCrossRef = this.findExistingCrossRefDirect(this.targetTable);
+        if (!window.CrossRefHorizontaleManager) {
+          this.showAlert("❌ Module de cross référence non chargé.");
+          return;
+        }
+
+        const existingCrossRef = window.CrossRefHorizontaleManager.findExistingCrossRef(this.targetTable);
 
         if (!existingCrossRef) {
           this.showAlert("⚠️ Aucune cross référence trouvée pour cette table.\n\nUtilisez 'Ajouter Cross référence horizontale' pour en créer une.");
           return;
         }
 
-        // Supprimer l'ancienne
-        existingCrossRef.remove();
-
-        // Recréer
+        window.CrossRefHorizontaleManager.deleteCrossRefForTable(this.targetTable);
         this.ajouterCrossRefHorizontale();
 
       } catch (error) {
@@ -11643,7 +11637,12 @@
       }
 
       try {
-        const crossRefTable = this.findExistingCrossRefDirect(this.targetTable);
+        if (!window.CrossRefHorizontaleManager) {
+          this.showAlert("❌ Module de cross référence non chargé.");
+          return;
+        }
+
+        const crossRefTable = window.CrossRefHorizontaleManager.findExistingCrossRef(this.targetTable);
 
         if (!crossRefTable) {
           this.showAlert("⚠️ Aucune cross référence trouvée pour cette table.");
@@ -11652,12 +11651,10 @@
         }
 
         if (confirm("Supprimer la cross référence de cette table ?")) {
-          crossRefTable.remove();
-
+          window.CrossRefHorizontaleManager.deleteCrossRefForTable(this.targetTable);
           this.showQuickNotification("✅ Cross référence supprimée");
           console.log("✅ [Cross Ref] Cross référence supprimée avec succès");
         }
-
       } catch (error) {
         console.error("❌ [Cross Ref] Erreur:", error);
         this.showAlert(`❌ Erreur lors de la suppression:\n\n${error.message}`);
