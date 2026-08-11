@@ -128,6 +128,7 @@
             { text: "Exporter Excel", action: () => this.exportExcel() },
             { text: "Exporter template Excel", action: () => this.exportTemplate() },
             { text: "Exporter template Word", action: () => this.exportTemplateWord() },
+            { text: "📐 Exporter template Word formaté A3", action: () => this.exportTemplateWordA3() },
             { text: "Intégration Doc", action: () => this.integrationDoc() }
           ]
         },
@@ -4505,6 +4506,310 @@
     }
 
     /**
+     * Exporter toutes les tables en format A3 PAYSAGE
+     * Pages A3 orientation paysage, retrait gauche fixe, tables normales largeur uniforme,
+     * tables Modelized (Assertion, Écart, CTR 1/2/3, Description, Conclusion) largeur auto
+     */
+    /**
+     * Exporter toutes les tables en format A3 PAYSAGE
+     * Retrait gauche et droit équilibrés, tables normales largeur de base (~24cm),
+     * tables Modelized largeur optimisée (~27.5cm) avec colonnes proportionnelles.
+     */
+    async exportTemplateWordA3() {
+      try {
+        this.showQuickNotification("📐 Export Word A3 Paysage en cours...");
+
+        // ✅ Utiliser la méthode robuste findRelatedTables() pour capturer TOUTES les tables du message
+        let tables = this.findRelatedTables();
+
+        if (!tables || tables.length === 0) {
+          tables = Array.from(document.querySelectorAll('div.prose table'));
+          console.log(`📐 Export Word A3 (fallback global): ${tables.length} tables trouvées`);
+        }
+
+        if (!tables || tables.length === 0) {
+          this.showAlert("⚠️ Aucune table trouvée dans le contexte actuel.");
+          return;
+        }
+
+        console.log(`📐 Export Word A3: ${tables.length} tables seront exportées`);
+
+        // Préparer les données des tables pour le backend
+        const tablesData = [];
+        tables.forEach(table => {
+          const tableData = this.extractTableDataOptimized(table);
+          if (tableData.length > 0) {
+            const headers = tableData[0] || [];
+            const rows = tableData.slice(1);
+            tablesData.push({ headers, rows });
+          }
+        });
+
+        if (tablesData.length === 0) {
+          this.showAlert("⚠️ Aucune donnée à exporter.");
+          return;
+        }
+
+        // Appeler le backend Python avec paramètre A3
+        try {
+          const response = await fetch((window.CLARA_BACKEND_URL || 'http://localhost:5000') + '/api/word/export-a3', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tables: tablesData })
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Erreur serveur');
+          }
+
+          const blob = await response.blob();
+          const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, "-");
+          const filename = `claraverse_A3_${timestamp}.docx`;
+
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = filename;
+          link.click();
+          URL.revokeObjectURL(link.href);
+
+          this.showQuickNotification(`✅ Export Word A3 terminé! (${tables.length} tables)`);
+
+        } catch (backendError) {
+          // Fallback JS si le backend n'est pas disponible ou 404
+          if (backendError.message.includes('fetch') || backendError.message.includes('NetworkError')
+              || backendError.message.includes('Failed to fetch') || backendError.message.includes('404')) {
+            console.log("⚠️ Backend non disponible pour A3, fallback JS avec toutes les tables...");
+            return this.exportTemplateWordA3JS(tables);
+          }
+          throw backendError;
+        }
+
+      } catch (error) {
+        console.error("Erreur export Word A3:", error);
+        this.showAlert(`❌ Erreur: ${error.message}`);
+      }
+    }
+
+    /**
+     * Export Word A3 Paysage via JavaScript (fallback pur JS sans backend)
+     *
+     * Spécifications:
+     * - Format A3 Paysage (420mm x 297mm)
+     * - Marges: 2.54 cm gauche/droite
+     * - Retrait gauche et droit lisibles pour toutes les tables
+     * - Tables de base: ~24.0 cm de largeur
+     * - Tables Modelized: ~27.5 cm avec colonnes proportionnelles au contenu
+     *
+     * @param {Array} [tableElements] - Optionnel: liste d'éléments table DOM
+     */
+    async exportTemplateWordA3JS(tableElements = null) {
+      try {
+        await this.ensureDocxLibraryLoaded();
+        const docxLib = this.getDocxLib();
+
+        // Récupérer les tables si non fournies
+        let tables = tableElements || this.findRelatedTables();
+        if (!tables || tables.length === 0) {
+          this.showAlert("⚠️ Aucune table trouvée.");
+          return;
+        }
+
+        // ─── Constantes de mise en page A3 Paysage ─────────────────────────────
+        // 1 cm = 567 twips
+        const PAGE_WIDTH_A3_LANDSCAPE  = 23814;  // 420mm en twips
+        const PAGE_HEIGHT_A3_LANDSCAPE = 16840;  // 297mm en twips
+
+        // Marges : 2.54 cm = 1440 twips
+        const MARGIN_LEFT   = 1440;   // ~2.54cm
+        const MARGIN_RIGHT  = 1440;   // ~2.54cm
+        const MARGIN_TOP    = 1134;   // ~2.0cm
+        const MARGIN_BOTTOM = 1134;   // ~2.0cm
+
+        // ─── Mots-clés pour détection et pondération des colonnes ─────────────
+        const computeColumnTwips = (headerCells) => {
+          const numCols = headerCells.length;
+          if (numCols === 0) return { colTwips: [], totalTwips: 13608 };
+
+          const headersLower = headerCells.map(cell => (cell.textContent || '').trim().toLowerCase());
+
+          // Vérifier si table sous-en-tête (A), (B), (C)
+          const isSubHeaderABC = headersLower.some(h => h.includes('(a)')) && headersLower.some(h => h.includes('(b)'));
+
+          const weights = [];
+          for (let i = 0; i < numCols; i++) {
+            const h = headersLower[i];
+            let w = 2.0;
+
+            if (isSubHeaderABC) {
+              if (h === '' || h === 'no') w = 5.5;
+              else if (h === '(a)' || h === '(b)') w = 1.8;
+              else if (h.includes('(c)')) w = 14.5;
+              else w = 3.0;
+            } else if (['no', 'n°', 'num', '#', 'ctr 1', 'ctr 2', 'ctr 3'].includes(h)) {
+              w = 1.2;
+            } else if (['symboles', 'symbole'].includes(h)) {
+              w = 18.0;
+            } else if (h.includes('libelle') || h.includes('libellé')) {
+              w = 2.5;
+            } else if (['compte', 'solde', 'ecart', 'écart', 'client', 'exercice', 'ref'].some(k => h.includes(k))) {
+              w = 2.0;
+            } else if (['assertion', 'cross reference', 'rubrique', 'etape', 'nature', 'légende', 'legende'].some(k => h.includes(k))) {
+              w = 3.5;
+            } else if (['superviseur', 'preparer', 'reviewer', 'pilote', 'responsable', 'conclusion'].some(k => h.includes(k))) {
+              w = 5.5;
+            } else if (['description', 'travaux', 'objectif', 'observation', 'constat', 'recommandation', 'document'].some(k => h.includes(k))) {
+              w = 11.0;
+            } else {
+              w = Math.max(2.0, h.length * 0.25);
+            }
+            weights.push(w);
+          }
+
+          const totalWeight = weights.reduce((a, b) => a + b, 0) || 1.0;
+          const isModelized = numCols >= 8 || (numCols >= 6 && headersLower.some(h => ['assertion', 'ecart', 'écart', 'ctr 1', 'ctr 2', 'ctr 3', 'conclusion'].some(k => h.includes(k))));
+
+          // Target width: ~24cm (13608 twips) pour tables de base, ~27.5cm (15592 twips) pour Modelized
+          const targetTotalTwips = isModelized ? 15592 : 13608;
+
+          const colTwips = weights.map(w => Math.round(targetTotalTwips * (w / totalWeight)));
+          const finalTotalTwips = colTwips.reduce((a, b) => a + b, 0);
+
+          return { colTwips, totalTwips: finalTotalTwips };
+        };
+
+        // ─── Couleurs ──────────────────────────────────────────────────────────
+        const burgundyColor = "800020";
+        const whiteColor    = "FFFFFF";
+        const blackColor    = "000000";
+
+        // ─── Construction du document ──────────────────────────────────────────
+        const children = [];
+
+        tables.forEach((table, tableIndex) => {
+          if (tableIndex > 0) {
+            children.push(new docxLib.Paragraph({
+              text: "",
+              spacing: { after: 200 }
+            }));
+          }
+
+          const rows = table.querySelectorAll('tr');
+          if (rows.length === 0) return;
+
+          const firstRowCells = Array.from(rows[0].querySelectorAll('th, td'));
+          const { colTwips, totalTwips } = computeColumnTwips(firstRowCells);
+
+          const tableRows = [];
+
+          rows.forEach((row, rowIndex) => {
+            const cells = row.querySelectorAll('th, td');
+            const isHeader = rowIndex === 0 || row.querySelector('th') !== null;
+
+            const tableCells = Array.from(cells).map((cell, colIndex) => {
+              const cellText = cell.textContent?.trim() || '';
+              const cellWidthTwips = colTwips[colIndex] || Math.round(totalTwips / Math.max(1, cells.length));
+
+              if (isHeader) {
+                return new docxLib.TableCell({
+                  width: { size: cellWidthTwips, type: docxLib.WidthType.DXA },
+                  children: [new docxLib.Paragraph({
+                    children: [new docxLib.TextRun({
+                      text: cellText,
+                      bold: true,
+                      color: whiteColor,
+                      size: 20
+                    })],
+                    alignment: docxLib.AlignmentType.CENTER
+                  })],
+                  shading: { fill: burgundyColor },
+                  borders: {
+                    top:    { style: docxLib.BorderStyle.SINGLE, size: 1, color: blackColor },
+                    bottom: { style: docxLib.BorderStyle.SINGLE, size: 1, color: blackColor },
+                    left:   { style: docxLib.BorderStyle.SINGLE, size: 1, color: blackColor },
+                    right:  { style: docxLib.BorderStyle.SINGLE, size: 1, color: blackColor }
+                  },
+                  verticalAlign: docxLib.VerticalAlign.CENTER
+                });
+              } else {
+                return new docxLib.TableCell({
+                  width: { size: cellWidthTwips, type: docxLib.WidthType.DXA },
+                  children: [new docxLib.Paragraph({
+                    children: [new docxLib.TextRun({
+                      text: cellText,
+                      color: blackColor,
+                      size: 18
+                    })]
+                  })],
+                  shading: { fill: whiteColor },
+                  borders: {
+                    top:    { style: docxLib.BorderStyle.SINGLE, size: 1, color: blackColor },
+                    bottom: { style: docxLib.BorderStyle.SINGLE, size: 1, color: blackColor },
+                    left:   { style: docxLib.BorderStyle.SINGLE, size: 1, color: blackColor },
+                    right:  { style: docxLib.BorderStyle.SINGLE, size: 1, color: blackColor }
+                  },
+                  verticalAlign: docxLib.VerticalAlign.CENTER
+                });
+              }
+            });
+
+            if (tableCells.length > 0) {
+              tableRows.push(new docxLib.TableRow({ children: tableCells }));
+            }
+          });
+
+          if (tableRows.length > 0) {
+            children.push(new docxLib.Table({
+              rows: tableRows,
+              width: { size: totalTwips, type: docxLib.WidthType.DXA },
+              indent: { size: 0, type: docxLib.WidthType.DXA },
+              layout: docxLib.TableLayoutType.FIXED
+            }));
+          }
+        });
+
+        // ─── Créer le document en A3 Paysage ──────────────────────────────────
+        const doc = new docxLib.Document({
+          sections: [{
+            properties: {
+              page: {
+                size: {
+                  width:       PAGE_WIDTH_A3_LANDSCAPE,
+                  height:      PAGE_HEIGHT_A3_LANDSCAPE,
+                  orientation: docxLib.PageOrientation.LANDSCAPE
+                },
+                margin: {
+                  top:    MARGIN_TOP,
+                  right:  MARGIN_RIGHT,
+                  bottom: MARGIN_BOTTOM,
+                  left:   MARGIN_LEFT
+                }
+              }
+            },
+            children: children
+          }]
+        });
+
+        // ─── Générer et télécharger le fichier ────────────────────────────────
+        const blob = await docxLib.Packer.toBlob(doc);
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[:]/g, "-");
+        const filename = `claraverse_A3_${timestamp}.docx`;
+
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(link.href);
+
+        this.showQuickNotification(`✅ Export Word A3 Paysage terminé! (${tables.length} tables)`);
+
+      } catch (error) {
+        console.error("Erreur export Word A3 JS:", error);
+        this.showAlert(`❌ Erreur export A3: ${error.message}`);
+      }
+    }
+
+    /**
      * Exporter la table active en rapport d'audit structuré
      * Génère un document Word avec les sections: Observation, Constat, Risque, Recommandation, etc.
      * @param {string} etape - Optionnel: 'synthese_frap', 'rapport_provisoire', 'rapport_final'
@@ -5858,34 +6163,53 @@
     }
 
     /**
-     * Trouver les tables liées à la table active (dans le même conteneur/div)
-     * @returns {NodeList|Array} Liste des tables dans le contexte (toutes les tables de la div parente)
+     * Trouver TOUTES les tables liées à la table active (dans le même conteneur du message)
+     * @returns {Array} Liste de toutes les tables HTML du message
      */
     findRelatedTables() {
-      // Si une table est sélectionnée, chercher TOUTES les tables dans le conteneur parent (div du message)
       if (this.targetTable) {
-        // Chercher le conteneur parent le plus large possible (le message complet)
-        const container = this.targetTable.closest('div.prose.prose-base.dark\\:prose-invert.max-w-none')
-          || this.targetTable.closest('.chat-message')
-          || this.targetTable.closest('.message-content')
-          || this.targetTable.closest('[class*="message"]')
-          || this.targetTable.closest('.overflow-x-auto')?.parentElement?.parentElement
-          || this.targetTable.parentElement?.parentElement
-          || this.targetTable.parentElement;
+        // 1. Remonter l'arbre DOM pour trouver le conteneur parent qui englobe le plus de tables dans le message
+        let current = this.targetTable.parentElement;
+        let bestContainer = null;
+        let maxTablesCount = 0;
 
-        if (container) {
-          // Chercher toutes les tables dans ce conteneur
-          const relatedTables = container.querySelectorAll('table');
+        while (current && current !== document.body && current !== document.documentElement) {
+          // Ne pas remonter jusqu'à la racine globale de tout le chat
+          if (current.id === 'chat-messages' || current.id === 'messages-container' || current.classList.contains('chat-history')) {
+            break;
+          }
+
+          const tablesInCurrent = current.querySelectorAll('table');
+          if (tablesInCurrent.length >= maxTablesCount) {
+            maxTablesCount = tablesInCurrent.length;
+            bestContainer = current;
+          }
+
+          // Si on est dans le conteneur prose / message et qu'on a déjà capturé plusieurs tables, s'arrêter
+          if (maxTablesCount > 1 && (
+            current.classList.contains('prose') ||
+            current.classList.contains('chat-message') ||
+            current.classList.contains('message-content') ||
+            current.getAttribute('data-message-id')
+          )) {
+            break;
+          }
+
+          current = current.parentElement;
+        }
+
+        if (bestContainer) {
+          const relatedTables = Array.from(bestContainer.querySelectorAll('table'));
           if (relatedTables.length > 0) {
-            console.log(`✅ Toutes les tables de la div trouvées: ${relatedTables.length} tables`);
+            console.log(`✅ [findRelatedTables] ${relatedTables.length} table(s) trouvée(s) dans le conteneur parent (${bestContainer.tagName}.${bestContainer.className})`);
             return relatedTables;
           }
         }
       }
 
-      // Fallback: utiliser findAllTables si pas de table active
-      console.log("⚠️ Pas de table active, recherche globale");
-      return this.findAllTables();
+      // Fallback: utiliser toutes les tables de la page
+      console.log("⚠️ [findRelatedTables] Pas de table active spécifique, recherche globale de toutes les tables...");
+      return Array.from(this.findAllTables());
     }
 
     /**
