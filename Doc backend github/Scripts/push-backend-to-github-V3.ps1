@@ -144,4 +144,4 @@ try {
 # Retour au dossier parent
 Set-Location ..
 Write-ColorOutput "`nRetour au répertoire racine." "Cyan"
-Write-Success "Terminé."
+Write-Success "Termine."

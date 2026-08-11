@@ -146,11 +146,18 @@ Doc backend github/
 
 ## 🔗 Liens Utiles
 
-- Repository Backend : https://github.com/sekadalle2024/Back-end-python-V0_03_03_2026.git
+- **Repository Backend Actuel (V5.1)** : https://github.com/sekadalle2024/Back-end-python-V5_23_04_2026--tree-master.git
+- Repository Backend (Ancien) : https://github.com/sekadalle2024/Back-end-python-V0_03_03_2026.git
 - Repository Principal : https://github.com/sekadalle2024/Claverse_windows__v_9_19-04-2026_V5-Export_CAC-V0-Public.git
 
 ## 📅 Historique
 
+- **16/07/2026** : Mise à jour Version 5.1
+  - Ajout script optimisé V5.1 avec meilleure gestion d'erreurs
+  - Création guide complet de démarrage rapide
+  - Ajout synthèse visuelle et index complet
+  - Documentation des commandes rapides
+  - URL repository mise à jour : Back-end-python-V5_23_04_2026--tree-master
 - **23/04/2026** : Solution définitive problème visibilité GitHub
   - Ajout script de diagnostic complet
   - Ajout script de sauvegarde avec vérification

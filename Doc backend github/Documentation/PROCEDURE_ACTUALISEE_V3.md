@@ -8,16 +8,27 @@ Sauvegarder le backend Python de manière **isolée** et **propre** sur le nouve
 
 ---
 
-## 🛠️ Script Recommandé
-Utilisez le nouveau script automatisé qui gère l'isolation du dépôt :
+## 🛠️ Scripts Recommandés
+
+### Option 1 : Script Simplifié (Recommandé)
+**Le plus fiable - Pas de problèmes d'encodage**
 ```powershell
-.\Doc backend github\Scripts\push-backend-to-github-V3.ps1
+.\Doc` backend` github\Scripts\push-backend-to-github-V3-SIMPLIFIE.ps1
 ```
 
-### Pourquoi utiliser cette version ?
-1.  **Isolation Totale** : Le script entre dans `py_backend/` pour pousser uniquement son contenu. Le repository GitHub distant contiendra le code à sa racine (prêt pour le cloud).
-2.  **Sécurité du Projet Global** : Le remote `origin` du dossier racine `ClaraVerse` n'est **jamais** modifié. Vous gardez votre connexion au repo principal intacte.
-3.  **Vérification Automatique** : Le script vérifie la présence de `main.py`, `endpoint_editeur.py` et `requirements.txt` avant de continuer.
+### Option 2 : Script Original V3
+```powershell
+.\Doc` backend` github\Scripts\push-backend-to-github-V3.ps1
+```
+
+> **💡 Recommandation** : Utilisez le script **SIMPLIFIE** qui évite tous les problèmes d'encodage PowerShell grâce à l'absence de caractères spéciaux.
+
+### Pourquoi utiliser le Script Simplifié ?
+1. **Sans Caractères Spéciaux** : Aucun accent, aucun problème d'encodage PowerShell
+2. **Isolation Totale** : Le script entre dans `py_backend/` pour pousser uniquement son contenu. Le repository GitHub distant contiendra le code à sa racine (prêt pour le cloud).
+3. **Sécurité du Projet Global** : Le remote `origin` du dossier racine `ClaraVerse` n'est **jamais** modifié. Vous gardez votre connexion au repo principal intacte.
+4. **Vérification Automatique** : Le script vérifie la présence de `main.py`, `endpoint_editeur.py` et `requirements.txt` avant de continuer.
+5. **Fiabilité Maximale** : Fonctionne sur tous les systèmes Windows sans configuration spéciale.
 
 ---
 
