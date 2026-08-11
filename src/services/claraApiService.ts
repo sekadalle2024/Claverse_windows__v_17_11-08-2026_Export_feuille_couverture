@@ -326,7 +326,7 @@ export class ClaraApiService {
       case "plan_audit":
         return "https://n8nsqlite.zeabur.app/webhook/plan_audit";
       case "programme_travail":
-        return "https://fpb7ab9h.rpcl.app/webhook-test/integration";
+        return "https://n8nsqlite.zeabur.app/webhook/template";
       case "data_analyst_aleatoire_simple":
         return this.SENTINEL_DATA_ANALYST;
       case "recos_controle_interne":
