@@ -1,6 +1,6 @@
 /**
  * Screen Selector Component
- * Permet de basculer entre les modes Wide screen et Normal screen
+ * Permet de basculer entre les modes Wide screen, Middle screen et Normal screen
  * pour les tables modélisées dans le chat E-audit
  */
 
@@ -8,7 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { Monitor } from 'lucide-react';
 import { getCurrentScreenMode, setScreenMode } from '../utils/screenManager';
 
-type ScreenMode = 'wide' | 'normal';
+type ScreenMode = 'wide' | 'middle' | 'normal';
 
 interface ScreenSelectorProps {
   className?: string;
@@ -23,12 +23,19 @@ const screenModes: { mode: ScreenMode; icon: string; name: string; description: 
     description: 'Élargit les tables modélisées'
   },
   {
+    mode: 'middle',
+    icon: '🖥️',
+    name: 'Middle screen',
+    description: 'Largeur intermédiaire (–10%)'
+  },
+  {
     mode: 'normal',
     icon: '🖥️',
     name: 'Normal screen',
     description: 'Largeur standard des tables'
   }
 ];
+
 
 const ScreenSelector: React.FC<ScreenSelectorProps> = ({
   className = '',
@@ -65,7 +72,13 @@ const ScreenSelector: React.FC<ScreenSelectorProps> = ({
         className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/50 dark:bg-gray-800/50 hover:bg-white/70 dark:hover:bg-gray-800/70 transition-colors border border-gray-200 dark:border-gray-700"
         title="Mode d'affichage écran"
       >
-        <Monitor className={`w-5 h-5 ${currentMode === 'wide' ? 'text-blue-500' : 'text-gray-700 dark:text-gray-300'}`} />
+        <Monitor className={`w-5 h-5 ${
+          currentMode === 'wide'
+            ? 'text-blue-500'
+            : currentMode === 'middle'
+            ? 'text-orange-500'
+            : 'text-gray-700 dark:text-gray-300'
+        }`} />
         {showLabel && (
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
             {currentInfo.name}

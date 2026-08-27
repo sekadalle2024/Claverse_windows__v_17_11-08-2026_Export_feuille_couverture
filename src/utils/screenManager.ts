@@ -1,24 +1,50 @@
 /**
  * Screen Manager for Claraverse
- * Manages Widescreen vs Normal screen modes natively
+ * Manages Widescreen vs Middle screen vs Normal screen modes natively
  */
 
 let widescreenObserver: MutationObserver | null = null;
 let adjustTimeout: any = null;
+let resizeListenerAttached = false;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// User-scroll guard: when the user manually scrolls, we pause debouncedAdjust
+// for USER_SCROLL_PAUSE_MS ms to avoid the MutationObserver triggering a
+// scroll-anchor repositioning that makes the view jump back up.
+// ──────────────────────────────────────────────────────────────────────────────
+const USER_SCROLL_PAUSE_MS = 800;
+let userScrollPauseUntil = 0;
+let userScrollListenerAttached = false;
+
+function attachUserScrollGuard(): void {
+  if (userScrollListenerAttached) return;
+  userScrollListenerAttached = true;
+  // Capture phase so we intercept scroll on the overflow-y-auto container
+  // regardless of where in the DOM it lives.
+  document.addEventListener(
+    'scroll',
+    () => {
+      userScrollPauseUntil = Date.now() + USER_SCROLL_PAUSE_MS;
+    },
+    { passive: true, capture: true }
+  );
+}
 
 /**
  * Get active screen mode from localStorage
  */
-export function getCurrentScreenMode(): 'wide' | 'normal' {
+export function getCurrentScreenMode(): 'wide' | 'middle' | 'normal' {
   const saved = localStorage.getItem('clara-screen-mode');
-  return saved === 'wide' ? 'wide' : 'normal';
+  if (saved === 'wide') return 'wide';
+  if (saved === 'middle') return 'middle';
+  return 'normal';
 }
 
 /**
  * Detect if a table is a Modelized Table by checking its headers
  */
 export function isModelizedTable(table: HTMLTableElement): boolean {
-  const headers = Array.from(table.querySelectorAll('th, td')).slice(0, 20).map(c => c.textContent?.toLowerCase().trim() || '');
+  const headers = Array.from(table.querySelectorAll('th, td')).slice(0, 30).map(c => c.textContent?.toLowerCase().trim() || '');
   if (headers.length > 0) {
     const hasKeyword = headers.some(h => {
       if (h.includes('conclusion')) return true;
@@ -26,11 +52,13 @@ export function isModelizedTable(table: HTMLTableElement): boolean {
       if (h.includes('ecart') || h.includes('écart')) return true;
       if (h.includes('resultat') || h.includes('résultat')) return true;
       if (/ctr\s*\d*/i.test(h)) return true;
+      if (h.includes('table de consolidation') || h.includes('consolidation')) return true;
+      if (h.includes('cross reference') || h.includes('cross references')) return true;
       return false;
     });
     if (hasKeyword) return true;
   }
-  // If we couldn't find specific keywords but it has a lot of columns, treat it as modelized
+  // If we couldn't find specific keywords but it has 5 or more columns, treat it as modelized
   const firstRowCells = table.querySelectorAll('tr:first-child th, tr:first-child td');
   if (firstRowCells.length >= 5) {
     return true; // Wide tables automatically qualify
@@ -39,90 +67,184 @@ export function isModelizedTable(table: HTMLTableElement): boolean {
 }
 
 let sessionMaxTargetWidth = 1200;
+let currentAppliedTargetWidth = 0;
 
 /**
- * Adjust all modelized tables and their containers to widescreen using CSS injection
+ * Ensures the static CSS stylesheet is injected once into document.head
  */
-export function adjustToWideScreen(): void {
+function ensureStyleTagInjected(): void {
+  let styleTag = document.getElementById('clara-widescreen-styles');
+  if (!styleTag) {
+    styleTag = document.createElement('style');
+    styleTag.id = 'clara-widescreen-styles';
+    styleTag.innerHTML = `
+      /* Prevent whole-page horizontal scrolling so the topbar and page remain fixed and stable */
+      html, body {
+        overflow-x: hidden !important;
+      }
+
+      /* ── FIX SCROLL-JUMP ────────────────────────────────────────────────────
+         The browser's Scroll Anchoring algorithm picks an "anchor element"
+         among the children of the scroll container and adjusts scrollTop to
+         keep that element at the same visual position when the layout changes.
+         In Wide/Middle mode the MutationObserver updates the CSS variable
+         --clara-target-width on <body>, which triggers a layout recalculation;
+         the browser then repositions the scroll container upward to maintain
+         its anchor, causing the visible jump.
+
+         The fix: disable overflow-anchor on the scroll container AND all its
+         descendants so no anchor element is ever chosen.
+      ── ────────────────────────────────────────────────────────────────────── */
+
+      /* Scroll container: disable padding change and anchoring */
+      body[data-clara-screen-mode="wide"] .flex-1.overflow-y-auto {
+        padding-left: 6px !important;
+        padding-right: 6px !important;
+        overflow-anchor: none !important;
+      }
+
+      /* All descendants of the scroll container: prevent browser from choosing
+         any of them as anchor elements (cascading override) */
+      body[data-clara-screen-mode="wide"] .flex-1.overflow-y-auto * {
+        overflow-anchor: none !important;
+      }
+
+      /* Widen the main wrappers (chat message area and input zone) with minimal 6px margin.
+         NO transition on max-width: CSS transitions trigger layout which re-activates
+         scroll anchoring in some Chromium versions even when overflow-anchor:none is set. */
+      body[data-clara-screen-mode="wide"] [data-widescreen-target="container"] {
+        max-width: var(--clara-target-width) !important;
+        width: calc(100% - 12px) !important;
+        margin-left: auto !important;
+        margin-right: auto !important;
+        box-sizing: border-box !important;
+      }
+
+      /* Message row: compact gap with avatar to maximize table width on the left */
+      body[data-clara-screen-mode="wide"] .flex.gap-4:has([data-widescreen-target="bubble"]) {
+        gap: 8px !important;
+      }
+
+      /* Message bubble container: natural flex item, aligned with avatar */
+      body[data-clara-screen-mode="wide"] [data-widescreen-target="bubble"] {
+        max-width: 100% !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box !important;
+      }
+
+      /* Inner bubble: compact padding (8px) to let the table use all available width */
+      body[data-clara-screen-mode="wide"] [data-widescreen-target="bubble-inner"] {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding-left: 8px !important;
+        padding-right: 8px !important;
+        box-sizing: border-box !important;
+        overflow-x: auto !important;
+      }
+
+      /* Tables inside prose: auto layout so column content sizes naturally */
+      body[data-clara-screen-mode="wide"] .prose table {
+        width: 100% !important;
+        table-layout: auto !important;
+        box-sizing: border-box !important;
+      }
+
+      /* Wrapper div of each table: horizontal scroll with minimal right buffer */
+      body[data-clara-screen-mode="wide"] .prose div:has(> table) {
+        max-width: 100% !important;
+        width: 100% !important;
+        overflow-x: auto !important;
+        box-sizing: border-box !important;
+        padding-right: 6px !important;
+        scrollbar-width: thin !important;
+      }
+
+      /* Ensure first column has clean padding */
+      body[data-clara-screen-mode="wide"] .prose table th:first-child,
+      body[data-clara-screen-mode="wide"] .prose table td:first-child {
+        padding-left: 8px !important;
+      }
+
+      /* Ensure right border and rightmost column padding are always visible */
+      body[data-clara-screen-mode="wide"] .prose table th:last-child,
+      body[data-clara-screen-mode="wide"] .prose table td:last-child {
+        border-right-width: 1px !important;
+        padding-right: 10px !important;
+      }
+    `;
+    document.head.appendChild(styleTag);
+  }
+}
+
+/**
+ * Adjust all modelized tables and their containers to a given screen mode using CSS variable updates.
+ * @param widthMultiplier - 1.0 for wide, 0.9 for middle
+ */
+function applyScreenMode(widthMultiplier: number): void {
   const tables = Array.from(document.querySelectorAll('table'));
   const modelizedTables = tables.filter(isModelizedTable);
 
-  // We don't return early anymore, we want the layout to widen even if no tables are currently visible, 
-  // so that the input zone stays wide.
-  
-  // 1. Find the maximum needed width across all visible modelised tables
+  // 1. Scan width from modelized tables non-intrusively (without mutating inline styles)
   modelizedTables.forEach(table => {
-    // Get true content width by temporarily expanding the table to max-content
-    const origWidth = table.style.width;
-    const origMaxWidth = table.style.maxWidth;
-    const origLayout = table.style.tableLayout;
-    
-    table.style.setProperty('width', 'max-content', 'important');
-    table.style.setProperty('max-width', 'none', 'important');
-    table.style.setProperty('table-layout', 'auto', 'important');
-    
-    const tableScrollWidth = table.scrollWidth;
-    
-    table.style.width = origWidth;
-    table.style.maxWidth = origMaxWidth;
-    table.style.tableLayout = origLayout;
-
-    // Add extra padding (160px) to ensure columns don't wrap and there is room for shadows & padding
-    const neededWidth = tableScrollWidth + 160;
+    const tableScrollWidth = table.scrollWidth || table.offsetWidth;
+    const neededWidth = tableScrollWidth + 60;
     if (neededWidth > sessionMaxTargetWidth) {
       sessionMaxTargetWidth = neededWidth;
     }
   });
 
-  // 2. Inject or update the global CSS rules
-  let styleTag = document.getElementById('clara-widescreen-styles');
-  if (!styleTag) {
-    styleTag = document.createElement('style');
-    styleTag.id = 'clara-widescreen-styles';
-    document.head.appendChild(styleTag);
+  // Calculate safe viewport width with minimal 12px total margin (6px left + 6px right)
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1920;
+  const maxSafeViewportWidth = Math.max(800, viewportWidth - 12);
+
+  // Apply the multiplier: 1.0 for wide, 0.9 for middle
+  const rawTargetWidth = Math.round(sessionMaxTargetWidth * widthMultiplier);
+  // Cap at safe viewport width so the table reaches right up to the edge safely
+  const effectiveWidth = Math.min(rawTargetWidth, maxSafeViewportWidth);
+
+  // 2. Ensure the static stylesheet is present
+  ensureStyleTagInjected();
+
+  // 3. Update the CSS variable on body only if changed (prevents unnecessary reflows)
+  if (currentAppliedTargetWidth !== effectiveWidth) {
+    currentAppliedTargetWidth = effectiveWidth;
+    document.body.style.setProperty('--clara-target-width', `${effectiveWidth}px`);
+  }
+  
+  // Activate the mode attribute on the body
+  if (document.body.getAttribute('data-clara-screen-mode') !== 'wide') {
+    document.body.setAttribute('data-clara-screen-mode', 'wide');
   }
 
-  // Set the CSS variable on the body
-  document.body.style.setProperty('--clara-target-width', `${sessionMaxTargetWidth}px`);
-  
-  // Activate the mode on the body
-  document.body.setAttribute('data-clara-screen-mode', 'wide');
+  // Attach window resize listener once to recalculate safe width when window is resized
+  if (!resizeListenerAttached) {
+    resizeListenerAttached = true;
+    window.addEventListener('resize', () => {
+      const mode = getCurrentScreenMode();
+      if (mode === 'wide' || mode === 'middle') {
+        debouncedAdjust();
+      }
+    });
+  }
 
-  styleTag.innerHTML = `
-    /* Widen the main wrappers (chat window and input zone) */
-    body[data-clara-screen-mode="wide"] [data-widescreen-target="container"] {
-      max-width: var(--clara-target-width) !important;
-      width: 95% !important;
-      transition: max-width 0.3s ease-out;
-    }
+  // Activate the user-scroll guard so manual scrolling suppresses debouncedAdjust
+  // calls and prevents the scroll-anchor algorithm from jumping the viewport.
+  attachUserScrollGuard();
+}
 
-    /* Widen the individual assistant message bubbles so tables can expand */
-    body[data-clara-screen-mode="wide"] [data-widescreen-target="bubble"] {
-      max-width: var(--clara-target-width) !important;
-      width: 95% !important;
-      margin-left: auto !important;
-      margin-right: auto !important;
-      transition: max-width 0.3s ease-out;
-    }
+/**
+ * Adjust all modelized tables and their containers to widescreen (100% width)
+ */
+export function adjustToWideScreen(): void {
+  applyScreenMode(1.0);
+}
 
-    /* Ensure the inner white bubble stretches to fit the new width */
-    body[data-clara-screen-mode="wide"] [data-widescreen-target="bubble-inner"] {
-      width: 100% !important;
-    }
-
-    /* Make ALL tables stretch nicely in wide mode to ensure uniformity */
-    body[data-clara-screen-mode="wide"] .prose table {
-      width: 100% !important;
-      table-layout: auto !important;
-    }
-
-    /* Ensure the direct wrapper of any table also expands */
-    body[data-clara-screen-mode="wide"] .prose div:has(> table) {
-      max-width: none !important;
-      width: 100% !important;
-      overflow-x: auto !important;
-    }
-  `;
+/**
+ * Adjust all modelized tables and their containers to middle screen (90% of wide width)
+ */
+export function adjustToMiddleScreen(): void {
+  applyScreenMode(0.9);
 }
 
 /**
@@ -130,58 +252,99 @@ export function adjustToWideScreen(): void {
  */
 export function restoreNormalScreen(): void {
   document.body.removeAttribute('data-clara-screen-mode');
+  currentAppliedTargetWidth = 0;
   
+  // Remove the injected style tag so no residual rules remain
+  const styleTag = document.getElementById('clara-widescreen-styles');
+  if (styleTag) {
+    styleTag.remove();
+  }
+
   // Optionally reset the session max width so it recalculates fresh if re-enabled
   sessionMaxTargetWidth = 1200;
 }
 
 /**
- * Run adjustment debounced to avoid layout thrashing and loop feedback
+ * Run adjustment debounced to avoid layout thrashing and loop feedback.
+ * Also honours the user-scroll guard: if the user has scrolled within
+ * USER_SCROLL_PAUSE_MS ms we skip the DOM adjustment entirely so the
+ * browser's scroll anchoring algorithm cannot reposition the viewport.
  */
 export function debouncedAdjust(): void {
   if (adjustTimeout) clearTimeout(adjustTimeout);
   adjustTimeout = setTimeout(() => {
-    if (getCurrentScreenMode() !== 'wide') return;
-    
-    // Disconnect temporarily to avoid tracking our own changes
-    if (widescreenObserver) {
-      widescreenObserver.disconnect();
-    }
-    
-    adjustToWideScreen();
-    
-    // Re-connect
-    if (widescreenObserver && getCurrentScreenMode() === 'wide') {
-      widescreenObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
+    const mode = getCurrentScreenMode();
+    if (mode === 'normal') return;
+
+    // ── User-scroll guard ────────────────────────────────────────────────────
+    // If the user scrolled recently, skip this adjustment cycle.
+    // The next DOM mutation (new table token or real content arrival) will
+    // schedule a fresh debouncedAdjust after the pause window has expired.
+    if (Date.now() < userScrollPauseUntil) return;
+    // ─────────────────────────────────────────────────────────────────────────
+
+    if (mode === 'wide') {
+      adjustToWideScreen();
+    } else if (mode === 'middle') {
+      adjustToMiddleScreen();
     }
   }, 50);
 }
 
 /**
- * Set active screen mode ('wide' or 'normal'), adjust layout, and toggle MutationObserver
+ * Starts the MutationObserver, carefully scoped to ONLY react to new <table> additions
+ * and never on scrolling, button toggles, or minor DOM updates.
  */
-export function setScreenMode(mode: 'wide' | 'normal'): void {
+function startWidescreenObserver(): void {
+  if (!widescreenObserver) {
+    widescreenObserver = new MutationObserver((mutations) => {
+      let hasNewTables = false;
+      for (const mutation of mutations) {
+        if (mutation.addedNodes.length > 0) {
+          for (let i = 0; i < mutation.addedNodes.length; i++) {
+            const node = mutation.addedNodes[i];
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              const el = node as HTMLElement;
+              if (el.tagName === 'TABLE' || el.querySelector?.('table')) {
+                hasNewTables = true;
+                break;
+              }
+            }
+          }
+        }
+        if (hasNewTables) break;
+      }
+
+      if (hasNewTables) {
+        debouncedAdjust();
+      }
+    });
+  }
+
+  widescreenObserver.disconnect();
+  widescreenObserver.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
+
+/**
+ * Set active screen mode ('wide', 'middle', or 'normal'), adjust layout, and toggle MutationObserver
+ */
+export function setScreenMode(mode: 'wide' | 'middle' | 'normal'): void {
   localStorage.setItem('clara-screen-mode', mode);
   
   if (mode === 'wide') {
+    sessionMaxTargetWidth = 1200;
+    currentAppliedTargetWidth = 0;
     adjustToWideScreen();
-    
-    // Start observer if not already started
-    if (!widescreenObserver) {
-      widescreenObserver = new MutationObserver(() => {
-        debouncedAdjust();
-      });
-    }
-    widescreenObserver.disconnect();
-    widescreenObserver.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
+    startWidescreenObserver();
+  } else if (mode === 'middle') {
+    sessionMaxTargetWidth = 1200;
+    currentAppliedTargetWidth = 0;
+    adjustToMiddleScreen();
+    startWidescreenObserver();
   } else {
-    // Stop observer
     if (widescreenObserver) {
       widescreenObserver.disconnect();
     }
@@ -197,20 +360,18 @@ export function setScreenMode(mode: 'wide' | 'normal'): void {
  */
 export function initializeScreenMode(): void {
   const mode = getCurrentScreenMode();
-  if (mode === 'wide') {
-    // Run immediately
-    adjustToWideScreen();
+  if (mode === 'wide' || mode === 'middle') {
+    sessionMaxTargetWidth = 1200;
+    currentAppliedTargetWidth = 0;
     
-    // Start observer
-    if (!widescreenObserver) {
-      widescreenObserver = new MutationObserver(() => {
-        debouncedAdjust();
-      });
+    if (mode === 'wide') {
+      adjustToWideScreen();
+    } else {
+      adjustToMiddleScreen();
     }
-    widescreenObserver.disconnect();
-    widescreenObserver.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
+    
+    startWidescreenObserver();
   }
 }
+
+
