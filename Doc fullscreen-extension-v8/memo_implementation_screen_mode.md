@@ -1,9 +1,10 @@
-# MÉMO D'IMPLÉMENTATION — Screen Mode (Wide / Normal) — Composant React Natif
+# MÉMO D'IMPLÉMENTATION — Screen Mode (Wide / Middle / Normal) — Composant React Natif
 
-> **Date** : 29 Mai 2026  
-> **Auteur** : Agent de code (Antigravity / Claude Opus 4.6)  
+> **Date initiale** : 29 Mai 2026  
+> **Mise à jour** : 27 Août 2026 — Ajout du mode Middle screen (v1.1)  
+> **Auteur** : Agent de code (Antigravity / Claude Sonnet 4.6)  
 > **Statut** : ✅ Implémenté et vérifié (build TypeScript : 0 erreurs)  
-> **Version** : 1.0
+> **Version** : 1.1
 
 ---
 
@@ -745,4 +746,29 @@ if (chatContainer) {
 
 ---
 
+## 16. Mises à jour v1.3 (27 Août 2026) — Optimisation Maximale Bord à Bord (Marges 6px)
+
+### Analyse des marges initiales
+Auparavant, le cumul des espacements par défaut réduisait l'espace utile :
+* Retrait gauche : `24px` (padding chat `p-6`) + `20px` (marge conteneur `96%`) + `48px` (avatar + gap) + `20px` (padding bulle `px-5`) = **112px**.
+* Retrait droit : `24px` (padding chat `p-6`) + `20px` (marge conteneur `96%`) + `20px` (padding bulle `px-5`) = **64px**.
+* **Perte totale de largeur** : **176px**.
+
+### Optimisations bord à bord (v1.3)
+1. **Distance bord d'écran minimale (6px)** :
+   * `maxSafeViewportWidth = Math.max(800, window.innerWidth - 12);` (6px à gauche, 6px à droite).
+   * `[data-widescreen-target="container"]` : `width: calc(100% - 12px) !important;`.
+2. **Réduction du padding du chat en mode Wide/Middle** :
+   * `.flex-1.overflow-y-auto` passe à `padding: 6px !important;`.
+3. **Optimisation du retrait gauche avec l'avatar** :
+   * `gap: 8px !important;` au lieu de `16px`.
+   * Padding intérieur de bulle `[data-widescreen-target="bubble-inner"]` à `8px !important;`.
+4. **Gain total obtenu** :
+   * **Plus de 130px de largeur horizontale supplémentaire** immédiatement disponible à l'écran pour les tables très larges.
+   * La première colonne (*N°*, *Compte*) et la dernière colonne (*Conclusion*, *Description*) sont visibles en pleine largeur avec seulement quelques pixels d'écart aux bords de l'écran.
+
+---
+
 > **Note pour les agents futurs** : Ce mémo est auto-suffisant. Tous les détails nécessaires pour comprendre, maintenir, déboguer ou faire évoluer la fonctionnalité sont documentés ici. En cas de doute, les fichiers sources de référence sont `src/utils/screenManager.ts` (logique) et `src/components/ScreenSelector.tsx` (UI). Le fichier `Doc fullscreen-extension-v8/background.js` contient l'algorithme Chrome d'origine (lignes 324-461).
+
+
