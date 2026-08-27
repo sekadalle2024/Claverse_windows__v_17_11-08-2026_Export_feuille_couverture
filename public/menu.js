@@ -9635,9 +9635,11 @@
     handleTableHover(e, table) {
       this.isHoveringTable = true;
       this.clearHideTimeout();
-      if (this.targetTable !== table && !this.isMenuVisible) {
-        this.hoverTimeout = setTimeout(() => { if (this.isHoveringTable && !this.isMenuVisible) this.showMenu(e.pageX + 10, e.pageY + 10, table); }, this.config.hoverDelay);
-      }
+      // Menu contextuel désactivé au survol - activation uniquement au clic droit
+      // Le code ci-dessous était responsable de l'ouverture automatique au survol
+      // if (this.targetTable !== table && !this.isMenuVisible) {
+      //   this.hoverTimeout = setTimeout(() => { if (this.isHoveringTable && !this.isMenuVisible) this.showMenu(e.pageX + 10, e.pageY + 10, table); }, this.config.hoverDelay);
+      // }
     }
 
     handleTableLeave(e, table) { this.isHoveringTable = false; this.clearHoverTimeout(); this.scheduleHideMenu(); }
